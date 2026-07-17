@@ -1,0 +1,208 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ContentType {
+  EXERCISE
+  EVALUATION
+}
+
+enum EvaluationType {
+  CLASSIC
+  WORD
+  EXCEL
+  POWERPOINT
+  MIXED
+}
+
+enum EvaluationStatus {
+  DRAFT
+  ACTIVE
+  DISABLED
+  FINISHED
+}
+
+enum PublicationStatus {
+  DRAFT
+  ACTIVE
+  DISABLED
+  FINISHED
+}
+
+enum QuestionType {
+  QCM
+  SHORT_TEXT
+  LONG_TEXT
+  FILE_UPLOAD
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  BLOCKED
+  EXPIRED
+}
+
+model User {
+  id          String       @id @default(cuid())
+  firstName   String
+  lastName    String
+  email       String       @unique
+  password    String
+  evaluations Evaluation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Evaluation {
+  id           String           @id @default(cuid())
+  title        String
+  description  String?
+  instructions String?
+  duration     Int
+  contentType  ContentType      @default(EVALUATION)
+  type         EvaluationType   @default(CLASSIC)
+  status       EvaluationStatus @default(DRAFT)
+
+  userId String?
+  user   User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  questions    Question[]
+  criteria     Criterion[]
+  publications Publication[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Publication {
+  id          String            @id @default(cuid())
+  name        String?
+  code        String            @unique
+  duration    Int
+  status      PublicationStatus @default(DRAFT)
+  availableAt DateTime?
+  closesAt    DateTime?
+
+  evaluationId String
+  evaluation   Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  attempts Attempt[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([evaluationId])
+  @@index([status])
+}
+
+model Question {
+  id            String       @id @default(cuid())
+  statement     String
+  type          QuestionType
+  points        Float        @default(1)
+  correctAnswer String?
+  position      Int          @default(0)
+
+  evaluationId String
+  evaluation   Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  choices Choice[]
+  answers Answer[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([evaluationId])
+}
+
+model Choice {
+  id       String  @id @default(cuid())
+  text     String
+  correct  Boolean @default(false)
+  position Int     @default(0)
+
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+}
+
+model Criterion {
+  id     String @id @default(cuid())
+  type   String
+  value  String
+  points Float
+
+  evaluationId String
+  evaluation   Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@index([evaluationId])
+}
+
+model Student {
+  id        String @id @default(cuid())
+  firstName String
+  lastName  String
+  email     String @unique
+
+  attempts Attempt[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Attempt {
+  id String @id @default(cuid())
+
+  publicationId String
+  studentId     String
+
+  publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  student     Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  startedAt   DateTime      @default(now())
+  endsAt      DateTime
+  submittedAt DateTime?
+  score       Float?
+  exitCount   Int           @default(0)
+  status      AttemptStatus @default(IN_PROGRESS)
+
+  answers Answer[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([publicationId, studentId])
+  @@index([publicationId])
+  @@index([studentId])
+  @@index([status])
+}
+
+model Answer {
+  id         String  @id @default(cuid())
+  textAnswer String?
+  filePath   String?
+  score      Float?
+
+  questionId String
+  attemptId  String
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  attempt  Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([questionId, attemptId])
+  @@index([attemptId])
+  @@index([questionId])
+}
