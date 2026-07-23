@@ -198,6 +198,7 @@ model Answer {
   id         String    @id @default(cuid())
   textAnswer String?
   filePath   String?
+  fileName   String?
   score      Float?
   gradedBy   GradedBy?
   feedback   String?

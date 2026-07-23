@@ -39,5 +39,10 @@ router.post(
   controller.gradeAnswerWithAi
 );
 router.post("/:id/publish", requireAuth, controller.publish);
+router.get(
+  "/:id/answers/:questionId/file",
+  requireAuth,
+  controller.downloadAnswerFile
+);
 
 module.exports = router;

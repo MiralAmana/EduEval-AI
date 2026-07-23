@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Check, Loader2, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  Download,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +26,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  getAnswerFileUrl,
   gradeAnswer,
   gradeAnswerWithAi,
   publishResults,
@@ -47,7 +54,13 @@ function formatDate(value) {
   }).format(date);
 }
 
-function QuestionReview({ question, onManualGrade, onAiGrade, savingKey }) {
+function QuestionReview({
+  attemptId,
+  question,
+  onManualGrade,
+  onAiGrade,
+  savingKey,
+}) {
   const [score, setScore] = useState(question.answer?.score ?? "");
   const [feedback, setFeedback] = useState(question.answer?.feedback || "");
 
@@ -134,11 +147,24 @@ function QuestionReview({ question, onManualGrade, onAiGrade, savingKey }) {
         )}
 
         {question.type === "FILE_UPLOAD" && (
-          <p className="text-sm text-muted-foreground">
-            {question.answer?.filePath
-              ? "Un fichier a été envoyé pour cette question."
-              : "Aucun fichier envoyé."}
-          </p>
+          <div>
+            {question.answer?.filePath ? (
+              <Button asChild size="sm" variant="outline">
+                <a
+                  href={getAnswerFileUrl(attemptId, question.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Download className="size-4" />
+                  Télécharger le fichier
+                </a>
+              </Button>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Aucun fichier envoyé.
+              </p>
+            )}
+          </div>
         )}
 
         <div className="grid gap-3 sm:grid-cols-[120px_1fr] sm:items-start">
@@ -373,6 +399,7 @@ export default function AttemptReview() {
         {data.questions.map((question) => (
           <QuestionReview
             key={question.id}
+            attemptId={attemptId}
             question={question}
             savingKey={savingKey}
             onManualGrade={handleManualGrade}

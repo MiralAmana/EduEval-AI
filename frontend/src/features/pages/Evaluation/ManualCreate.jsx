@@ -273,6 +273,7 @@ export default function ManualCreate() {
                   <option value="QCM">QCM</option>
                   <option value="SHORT_TEXT">Réponse courte</option>
                   <option value="LONG_TEXT">Réponse longue</option>
+                  <option value="FILE_UPLOAD">Fichier à téléverser</option>
                 </select>
               </div>
 

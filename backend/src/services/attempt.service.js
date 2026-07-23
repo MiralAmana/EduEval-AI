@@ -1,4 +1,5 @@
 const fs = require("node:fs/promises");
+const path = require("node:path");
 
 const prisma = require("../lib/prisma");
 const { sanitizeQuestionsForStudent } = require("../lib/sanitize");
@@ -464,7 +465,7 @@ async function saveTextAnswer(attemptId, questionId, textAnswer) {
   return getAttempt(attemptId);
 }
 
-async function saveFileAnswer(attemptId, questionId, filePath) {
+async function saveFileAnswer(attemptId, questionId, filePath, fileName) {
   const attempt = await requireActiveAttempt(attemptId);
 
   const question = attempt.publication.evaluation.questions.find(
@@ -495,12 +496,14 @@ async function saveFileAnswer(attemptId, questionId, filePath) {
 
     update: {
       filePath,
+      fileName,
     },
 
     create: {
       questionId,
       attemptId,
       filePath,
+      fileName,
     },
   });
 
@@ -775,6 +778,24 @@ async function publishResults(attemptId, userId) {
   return getAttemptForReview(attemptId, userId);
 }
 
+async function getAnswerFileForTeacher(attemptId, questionId, userId) {
+  const attempt = await requireAttemptOwnedByTeacher(attemptId, userId);
+  const answer = attempt.answers.find(
+    (item) => item.questionId === questionId
+  );
+
+  if (!answer?.filePath) {
+    const error = new Error("Aucun fichier n’a été envoyé pour cette question.");
+    error.status = 404;
+    throw error;
+  }
+
+  return {
+    filePath: path.resolve(answer.filePath),
+    fileName: answer.fileName || path.basename(answer.filePath),
+  };
+}
+
 module.exports = {
   joinPublication,
   getAttempt,
@@ -786,4 +807,5 @@ module.exports = {
   gradeAnswerManually,
   gradeAnswerWithAiAssist,
   publishResults,
+  getAnswerFileForTeacher,
 };

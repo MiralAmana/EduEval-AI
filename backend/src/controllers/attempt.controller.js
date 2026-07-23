@@ -81,7 +81,8 @@ async function saveFileAnswer(req, res, next) {
     const payload = await attemptService.saveFileAnswer(
       req.params.id,
       req.params.questionId,
-      req.file.path
+      req.file.path,
+      req.file.originalname
     );
 
     return res.json(payload);
@@ -179,6 +180,21 @@ async function publish(req, res, next) {
   }
 }
 
+async function downloadAnswerFile(req, res, next) {
+  try {
+    const { filePath, fileName } =
+      await attemptService.getAnswerFileForTeacher(
+        req.params.id,
+        req.params.questionId,
+        req.userId
+      );
+
+    return res.download(filePath, fileName);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   join,
   getOne,
@@ -190,4 +206,5 @@ module.exports = {
   gradeAnswer,
   gradeAnswerWithAi,
   publish,
+  downloadAnswerFile,
 };

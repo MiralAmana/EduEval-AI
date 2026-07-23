@@ -80,3 +80,7 @@ export async function publishResults(attemptId) {
 
   return response.data;
 }
+
+export function getAnswerFileUrl(attemptId, questionId) {
+  return `http://localhost:3000/api/attempts/${attemptId}/answers/${questionId}/file`;
+}
