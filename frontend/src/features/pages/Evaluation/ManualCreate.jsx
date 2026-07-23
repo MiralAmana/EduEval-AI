@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { createEvaluation } from "@/services/evaluation.service";
 
 function createEmptyQuestion() {
   return {
@@ -25,6 +26,7 @@ function createEmptyQuestion() {
 
 export default function ManualCreate() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const contentType = searchParams.get("contentType") || "EVALUATION";
 
   const [form, setForm] = useState({
@@ -35,6 +37,9 @@ export default function ManualCreate() {
   });
 
   const [questions, setQuestions] = useState([createEmptyQuestion()]);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [saving, setSaving] = useState(false);
 
   function updateForm(event) {
     const { name, value } = event.target;
@@ -86,21 +91,46 @@ export default function ManualCreate() {
     );
   }
 
+  async function handleCreate(status) {
+    setError("");
+    setSaving(true);
+
+    try {
+      const evaluation = await createEvaluation({
+        contentType,
+        ...form,
+        status,
+        duration: Number(form.duration),
+        questions: questions.map(({ id, ...question }) => ({
+          ...question,
+          points: Number(question.points),
+        })),
+      });
+
+      const accessCode = evaluation.publications?.[0]?.code;
+
+      setSuccess(
+        accessCode
+          ? `Évaluation créée et publiée avec succès. Code d’accès : ${accessCode}`
+          : "Évaluation créée avec succès."
+      );
+
+      window.setTimeout(() => {
+        navigate(`/evaluations/${evaluation.id}`);
+      }, 1200);
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.message ||
+          "Impossible d’enregistrer l’évaluation."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function handleSubmit(event) {
     event.preventDefault();
-
-    const payload = {
-      contentType,
-      ...form,
-      duration: Number(form.duration),
-      questions: questions.map((question) => ({
-        ...question,
-        points: Number(question.points),
-      })),
-    };
-
-    console.log("Évaluation à enregistrer :", payload);
-    alert("Les données sont prêtes à être envoyées au backend.");
+    handleCreate("ACTIVE");
   }
 
   return (
@@ -121,6 +151,18 @@ export default function ManualCreate() {
           Ajoutez les informations générales et les questions.
         </p>
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
+      {success && (
+        <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4">
+          <p className="font-medium text-green-700">{success}</p>
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -164,15 +206,6 @@ export default function ManualCreate() {
               value={form.duration}
               onChange={updateForm}
             />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Statut initial</label>
-
-            <select className="h-9 w-full rounded-md border bg-transparent px-3 text-sm">
-              <option value="DRAFT">Brouillon</option>
-              <option value="ACTIVE">Active</option>
-            </select>
           </div>
 
           <div className="space-y-2 md:col-span-2">
@@ -321,11 +354,18 @@ export default function ManualCreate() {
       </Card>
 
       <div className="flex justify-end gap-3">
-        <Button type="button" variant="outline">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={saving}
+          onClick={() => handleCreate("DRAFT")}
+        >
           Enregistrer en brouillon
         </Button>
 
-        <Button type="submit">Créer et activer</Button>
+        <Button type="submit" disabled={saving}>
+          {saving ? "Création..." : "Créer et activer"}
+        </Button>
       </div>
     </form>
   );

@@ -142,30 +142,16 @@ function getMaximumScore(evaluation) {
 }
 
 /**
- * Récupère les tentatives à partir de plusieurs structures API possibles.
+ * Récupère les tentatives de toutes les publications de l'évaluation.
  */
 function getAttempts(evaluation) {
-  if (
-    Array.isArray(evaluation?.attempts)
-  ) {
-    return evaluation.attempts;
+  if (!Array.isArray(evaluation?.publications)) {
+    return [];
   }
 
-  if (
-    Array.isArray(
-      evaluation?.submissions
-    )
-  ) {
-    return evaluation.submissions;
-  }
-
-  if (
-    Array.isArray(evaluation?.results)
-  ) {
-    return evaluation.results;
-  }
-
-  return [];
+  return evaluation.publications.flatMap(
+    (publication) => publication.attempts || []
+  );
 }
 
 /**

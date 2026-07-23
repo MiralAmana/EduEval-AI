@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  Check,
   Clock3,
   Copy,
-  Eye,
   FileQuestion,
+  KeyRound,
   Layers3,
   PauseCircle,
   Pencil,
@@ -62,6 +64,27 @@ export default function EvaluationCard({
 
   const isActive = evaluation.status === "ACTIVE";
 
+  const accessPublication =
+    evaluation.publications?.find(
+      (publication) => publication.status === "ACTIVE"
+    ) ?? evaluation.publications?.[0];
+
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopyCode(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!accessPublication?.code) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(accessPublication.code);
+
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }
+
   const createdAt = new Intl.DateTimeFormat("fr-FR", {
     day: "2-digit",
     month: "short",
@@ -69,7 +92,11 @@ export default function EvaluationCard({
   }).format(new Date(evaluation.createdAt));
 
   return (
-    <Card className="flex h-full flex-col">
+    <Card className="flex h-full flex-col transition hover:shadow-md">
+      <Link
+        to={`/evaluations/${evaluation.id}`}
+        className="flex flex-1 flex-col text-inherit no-underline"
+      >
       <CardHeader className="space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -144,6 +171,38 @@ export default function EvaluationCard({
           </div>
         </div>
 
+        <div className="flex items-center justify-between gap-3 rounded-lg border bg-primary/5 p-3">
+          <div className="flex items-center gap-2">
+            <KeyRound className="size-4 text-primary" />
+
+            <div>
+              <p className="text-xs text-muted-foreground">
+                Code d’accès
+              </p>
+
+              <p className="font-mono text-base font-bold tracking-wider">
+                {accessPublication?.code || "Non généré"}
+              </p>
+            </div>
+          </div>
+
+          {accessPublication?.code && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleCopyCode}
+            >
+              {copied ? (
+                <Check className="size-4" />
+              ) : (
+                <Copy className="size-4" />
+              )}
+              {copied ? "Copié" : "Copier"}
+            </Button>
+          )}
+        </div>
+
         <div className="rounded-lg border bg-muted/30 p-3">
           <p className="text-xs text-muted-foreground">
             Créée le
@@ -154,15 +213,9 @@ export default function EvaluationCard({
           </p>
         </div>
       </CardContent>
+      </Link>
 
       <CardFooter className="flex flex-wrap gap-2 border-t pt-5">
-        <Button asChild size="sm" variant="outline">
-          <Link to={`/evaluations/${evaluation.id}`}>
-            <Eye className="size-4" />
-            Voir
-          </Link>
-        </Button>
-
         <Button asChild size="sm" variant="outline">
           <Link to={`/evaluations/${evaluation.id}/edit`}>
             <Pencil className="size-4" />

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 
 import GeneralTab from "./tabs/GeneralTab";
 import QuestionsTab from "./tabs/QuestionsTab";
-import PublicationsTab from "./tabs/PublicationsTab";
 import StatisticsTab from "./tabs/StatisticsTab";
+import EvaluationAccessCard from "./EvaluationAccessCard";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,10 +20,6 @@ const tabs = [
   {
     id: "questions",
     label: "Questions",
-  },
-  {
-    id: "publications",
-    label: "Publications",
   },
   {
     id: "statistics",
@@ -67,7 +64,7 @@ export default function EvaluationDetails() {
   if (loading) {
     return (
       <div className="flex h-[70vh] items-center justify-center">
-        Chargement...
+        <Loader2 className="size-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -122,6 +119,11 @@ export default function EvaluationDetails() {
 
       </div>
 
+      <EvaluationAccessCard
+        evaluation={evaluation}
+        onEvaluationChange={loadEvaluation}
+      />
+
       {/* Navigation des onglets */}
 
       <div className="flex gap-3 border-b">
@@ -157,13 +159,6 @@ export default function EvaluationDetails() {
       {activeTab === "questions" && (
         <QuestionsTab
           evaluation={evaluation}
-        />
-      )}
-
-      {activeTab === "publications" && (
-        <PublicationsTab
-          evaluation={evaluation}
-          reloadEvaluation={loadEvaluation}
         />
       )}
 

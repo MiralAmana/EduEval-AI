@@ -154,6 +154,7 @@ export default function AiCreate() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   function updateForm(event) {
     const { name, value } = event.target;
@@ -483,11 +484,17 @@ export default function AiCreate() {
             ),
         });
 
-      alert(
-        `Création réussie. Code d’accès : ${evaluation.code}`
+      const accessCode = evaluation.publications?.[0]?.code;
+
+      setSuccess(
+        accessCode
+          ? `Évaluation créée et publiée avec succès. Code d’accès : ${accessCode}`
+          : "Évaluation créée avec succès."
       );
 
-      navigate("/evaluations");
+      window.setTimeout(() => {
+        navigate(`/evaluations/${evaluation.id}`);
+      }, 1200);
     } catch (requestError) {
       setError(
         requestError.response?.data?.message ||
@@ -1065,6 +1072,18 @@ export default function AiCreate() {
               )}
             </CardContent>
           </Card>
+
+          {error && (
+            <p className="text-sm font-medium text-destructive">
+              {error}
+            </p>
+          )}
+
+          {success && (
+            <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4">
+              <p className="font-medium text-green-700">{success}</p>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3">
             <Button

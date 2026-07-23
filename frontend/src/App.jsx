@@ -6,19 +6,24 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 
 import Evaluations from "@/features/pages/Evaluations";
 import EvaluationEdit from "@/features/pages/EvaluationEdit";
+import Students from "@/features/pages/Students";
 
 import AiCreate from "@/features/pages/Evaluation/AiCreate";
 import CreateChoice from "@/features/pages/Evaluation/CreateChoice";
 import EvaluationDetails from "@/features/pages/Evaluation/EvaluationDetails";
+import AttemptReview from "@/features/pages/Evaluation/AttemptReview";
 import ManualCreate from "@/features/pages/Evaluation/ManualCreate";
 import PdfImport from "@/features/pages/Evaluation/PdfImport";
 import Login from "@/features/pages/Auth/Login";
 import Register from "@/features/pages/Auth/Register";
+import StudentAccess from "@/features/pages/StudentAccess";
+import TakeEvaluation from "@/features/pages/TakeEvaluation";
 
 /**
  * Page affichée lorsqu'aucune route ne correspond.
@@ -84,6 +89,13 @@ function AppLayout({ children }) {
               Évaluations
             </a>
 
+            <a
+              href="/students"
+              className="text-sm font-medium text-muted-foreground transition hover:text-foreground"
+            >
+              Étudiants
+            </a>
+
             {user && (
               <>
                 <span className="text-sm text-muted-foreground">
@@ -121,7 +133,7 @@ function RequireAuth({ children }) {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <p className="text-sm text-muted-foreground">Chargement...</p>
+        <Loader2 className="size-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -159,6 +171,11 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
 
+      {/* Accès étudiant */}
+
+      <Route path="/access" element={<StudentAccess />} />
+      <Route path="/evaluation/:attemptId" element={<TakeEvaluation />} />
+
       {/* Liste des évaluations */}
 
       <Route
@@ -167,6 +184,19 @@ function AppRoutes() {
           <RequireAuth>
             <AppLayout>
               <Evaluations />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+
+      {/* Étudiants, toutes évaluations confondues */}
+
+      <Route
+        path="/students"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <Students />
             </AppLayout>
           </RequireAuth>
         }
@@ -245,6 +275,19 @@ function AppRoutes() {
           <RequireAuth>
             <AppLayout>
               <EvaluationDetails />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+
+      {/* Correction d'une tentative */}
+
+      <Route
+        path="/evaluations/:id/attempts/:attemptId"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <AttemptReview />
             </AppLayout>
           </RequireAuth>
         }

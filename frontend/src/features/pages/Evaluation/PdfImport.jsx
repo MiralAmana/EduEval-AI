@@ -326,13 +326,16 @@ const navigate = useNavigate();
 
   try {
     const evaluation = await createEvaluation(payload);
+    const accessCode = evaluation.publications?.[0]?.code;
 
     setSuccess(
-      `Évaluation créée avec succès. Code d’accès : ${evaluation.code}`
+      accessCode
+        ? `Évaluation créée et publiée avec succès. Code d’accès : ${accessCode}`
+        : "Évaluation créée avec succès. Ouvre l’onglet « Publications » pour générer un code d’accès."
     );
 
     window.setTimeout(() => {
-      navigate("/evaluations");
+      navigate(`/evaluations/${evaluation.id}`);
     }, 1500);
   } catch (requestError) {
     console.error(requestError);
