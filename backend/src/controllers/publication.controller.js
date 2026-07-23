@@ -1,6 +1,7 @@
 const publicationService = require(
   "../services/publication.service"
 );
+const { sanitizeQuestionsForStudent } = require("../lib/sanitize");
 
 const allowedStatuses = [
   "DRAFT",
@@ -210,7 +211,15 @@ async function getByCode(req, res, next) {
       });
     }
 
-    return res.json(publication);
+    return res.json({
+      ...publication,
+      evaluation: {
+        ...publication.evaluation,
+        questions: sanitizeQuestionsForStudent(
+          publication.evaluation.questions
+        ),
+      },
+    });
   } catch (error) {
     return next(error);
   }

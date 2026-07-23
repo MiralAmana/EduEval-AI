@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { generateUniqueCode } = require("../lib/publicationCode");
 
 function normalizeChoices(question) {
   if (!Array.isArray(question.choices)) {
@@ -58,6 +59,16 @@ const evaluationInclude = {
     },
 
     include: {
+      attempts: {
+        orderBy: {
+          createdAt: "desc",
+        },
+
+        include: {
+          student: true,
+        },
+      },
+
       _count: {
         select: {
           attempts: true,
@@ -74,30 +85,107 @@ const evaluationInclude = {
   },
 };
 
+/**
+ * Garantit qu'une évaluation active possède une publication ACTIVE
+ * (donc un code d'accès utilisable), en réactivant une publication
+ * existante plutôt que d'en recréer une nouvelle.
+ */
+async function ensureActivePublication(transaction, evaluation) {
+  const existingPublication = await transaction.publication.findFirst({
+    where: {
+      evaluationId: evaluation.id,
+    },
+
+    select: {
+      id: true,
+      status: true,
+    },
+  });
+
+  if (existingPublication) {
+    if (existingPublication.status !== "ACTIVE") {
+      await transaction.publication.update({
+        where: {
+          id: existingPublication.id,
+        },
+
+        data: {
+          status: "ACTIVE",
+        },
+      });
+    }
+
+    return;
+  }
+
+  const code = await generateUniqueCode();
+
+  await transaction.publication.create({
+    data: {
+      name: `${evaluation.title} — Publication`,
+      code,
+      duration: evaluation.duration,
+      status: "ACTIVE",
+      evaluationId: evaluation.id,
+    },
+  });
+}
+
+/**
+ * Empêche l'accès des étudiants dès qu'une évaluation n'est plus
+ * active, même si son code d'accès existe toujours.
+ */
+async function deactivatePublications(transaction, evaluationId) {
+  await transaction.publication.updateMany({
+    where: {
+      evaluationId,
+      status: "ACTIVE",
+    },
+
+    data: {
+      status: "DISABLED",
+    },
+  });
+}
+
 async function createEvaluation(data, userId) {
   const questions = Array.isArray(data.questions)
     ? data.questions
     : [];
 
-  return prisma.evaluation.create({
-    data: {
-      title: data.title,
-      description: data.description || null,
-      instructions: data.instructions || null,
-      duration: Number(data.duration),
-      contentType: data.contentType || "EVALUATION",
-      type: data.type || "CLASSIC",
-      status: data.status || "DRAFT",
-      userId,
+  const status = data.status || "DRAFT";
 
-      questions: {
-        create: questions.map((question, index) =>
-          prepareQuestion(question, index)
-        ),
+  return prisma.$transaction(async (transaction) => {
+    const evaluation = await transaction.evaluation.create({
+      data: {
+        title: data.title,
+        description: data.description || null,
+        instructions: data.instructions || null,
+        duration: Number(data.duration),
+        contentType: data.contentType || "EVALUATION",
+        type: data.type || "CLASSIC",
+        status,
+        userId,
+
+        questions: {
+          create: questions.map((question, index) =>
+            prepareQuestion(question, index)
+          ),
+        },
       },
-    },
+    });
 
-    include: evaluationInclude,
+    if (status === "ACTIVE") {
+      await ensureActivePublication(transaction, evaluation);
+    }
+
+    return transaction.evaluation.findUnique({
+      where: {
+        id: evaluation.id,
+      },
+
+      include: evaluationInclude,
+    });
   });
 }
 
@@ -156,7 +244,7 @@ async function updateEvaluation(id, userId, data) {
       });
     }
 
-    return transaction.evaluation.update({
+    const evaluation = await transaction.evaluation.update({
       where: {
         id,
       },
@@ -179,6 +267,18 @@ async function updateEvaluation(id, userId, data) {
               },
             }
           : {}),
+      },
+    });
+
+    if (evaluation.status === "ACTIVE") {
+      await ensureActivePublication(transaction, evaluation);
+    } else {
+      await deactivatePublications(transaction, id);
+    }
+
+    return transaction.evaluation.findUnique({
+      where: {
+        id,
       },
 
       include: evaluationInclude,
@@ -211,32 +311,46 @@ async function deleteEvaluation(id, userId) {
 }
 
 async function updateEvaluationStatus(id, userId, status) {
-  const existingEvaluation =
-    await prisma.evaluation.findFirst({
+  return prisma.$transaction(async (transaction) => {
+    const existingEvaluation =
+      await transaction.evaluation.findFirst({
+        where: {
+          id,
+          userId,
+        },
+
+        select: {
+          id: true,
+        },
+      });
+
+    if (!existingEvaluation) {
+      return null;
+    }
+
+    const evaluation = await transaction.evaluation.update({
       where: {
         id,
-        userId,
       },
 
-      select: {
-        id: true,
+      data: {
+        status,
       },
     });
 
-  if (!existingEvaluation) {
-    return null;
-  }
+    if (status === "ACTIVE") {
+      await ensureActivePublication(transaction, evaluation);
+    } else {
+      await deactivatePublications(transaction, id);
+    }
 
-  return prisma.evaluation.update({
-    where: {
-      id,
-    },
+    return transaction.evaluation.findUnique({
+      where: {
+        id,
+      },
 
-    data: {
-      status,
-    },
-
-    include: evaluationInclude,
+      include: evaluationInclude,
+    });
   });
 }
 

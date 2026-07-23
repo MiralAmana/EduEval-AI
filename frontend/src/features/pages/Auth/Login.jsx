@@ -107,6 +107,13 @@ function Login() {
             </p>
           </CardContent>
         </Card>
+
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Vous êtes étudiant ?{" "}
+          <Link to="/access" className="font-medium text-primary">
+            Accédez à votre évaluation
+          </Link>
+        </p>
       </div>
     </main>
   );

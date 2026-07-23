@@ -12,6 +12,7 @@ const evaluationRoutes = require(
 const publicationRoutes = require(
   "./routes/publication.routes"
 );
+const attemptRoutes = require("./routes/attempt.routes");
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.use("/api/pdf", pdfRoutes);
 app.use("/api/word", wordRoutes);
 app.use("/api/evaluations", evaluationRoutes);
 app.use("/api/publications", publicationRoutes);
+app.use("/api/attempts", attemptRoutes);
 
 /**
  * Affiche clairement les routes inexistantes.

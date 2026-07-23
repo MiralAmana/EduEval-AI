@@ -47,6 +47,12 @@ enum AttemptStatus {
   EXPIRED
 }
 
+enum GradedBy {
+  AUTO
+  AI
+  TEACHER
+}
+
 model User {
   id          String       @id @default(cuid())
   firstName   String
@@ -169,12 +175,13 @@ model Attempt {
   publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
   student     Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  startedAt   DateTime      @default(now())
-  endsAt      DateTime
-  submittedAt DateTime?
-  score       Float?
-  exitCount   Int           @default(0)
-  status      AttemptStatus @default(IN_PROGRESS)
+  startedAt        DateTime      @default(now())
+  endsAt           DateTime
+  submittedAt      DateTime?
+  score            Float?
+  exitCount        Int           @default(0)
+  status           AttemptStatus @default(IN_PROGRESS)
+  resultsPublished Boolean       @default(false)
 
   answers Answer[]
 
@@ -188,10 +195,12 @@ model Attempt {
 }
 
 model Answer {
-  id         String  @id @default(cuid())
+  id         String    @id @default(cuid())
   textAnswer String?
   filePath   String?
   score      Float?
+  gradedBy   GradedBy?
+  feedback   String?
 
   questionId String
   attemptId  String
