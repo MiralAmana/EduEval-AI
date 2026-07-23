@@ -133,10 +133,13 @@ async function create(req, res, next) {
     }
 
     const evaluation =
-      await evaluationService.createEvaluation({
-        ...req.body,
-        title: String(req.body.title).trim(),
-      });
+      await evaluationService.createEvaluation(
+        {
+          ...req.body,
+          title: String(req.body.title).trim(),
+        },
+        req.userId
+      );
 
     return res.status(201).json(evaluation);
   } catch (error) {
@@ -147,7 +150,7 @@ async function create(req, res, next) {
 async function getAll(req, res, next) {
   try {
     const evaluations =
-      await evaluationService.getEvaluations();
+      await evaluationService.getEvaluations(req.userId);
 
     return res.json(evaluations);
   } catch (error) {
@@ -159,7 +162,8 @@ async function getOne(req, res, next) {
   try {
     const evaluation =
       await evaluationService.getEvaluationById(
-        req.params.id
+        req.params.id,
+        req.userId
       );
 
     if (!evaluation) {
@@ -188,6 +192,7 @@ async function update(req, res, next) {
     const evaluation =
       await evaluationService.updateEvaluation(
         req.params.id,
+        req.userId,
         {
           ...req.body,
           title: String(req.body.title).trim(),
@@ -210,7 +215,8 @@ async function remove(req, res, next) {
   try {
     const evaluation =
       await evaluationService.deleteEvaluation(
-        req.params.id
+        req.params.id,
+        req.userId
       );
 
     if (!evaluation) {
@@ -240,6 +246,7 @@ async function updateStatus(req, res, next) {
     const evaluation =
       await evaluationService.updateEvaluationStatus(
         req.params.id,
+        req.userId,
         status
       );
 
@@ -259,7 +266,8 @@ async function duplicate(req, res, next) {
   try {
     const evaluation =
       await evaluationService.duplicateEvaluation(
-        req.params.id
+        req.params.id,
+        req.userId
       );
 
     if (!evaluation) {

@@ -3,7 +3,11 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
+  useNavigate,
 } from "react-router-dom";
+
+import { AuthProvider, useAuth } from "@/context/AuthContext";
 
 import Evaluations from "@/features/pages/Evaluations";
 import EvaluationEdit from "@/features/pages/EvaluationEdit";
@@ -13,6 +17,8 @@ import CreateChoice from "@/features/pages/Evaluation/CreateChoice";
 import EvaluationDetails from "@/features/pages/Evaluation/EvaluationDetails";
 import ManualCreate from "@/features/pages/Evaluation/ManualCreate";
 import PdfImport from "@/features/pages/Evaluation/PdfImport";
+import Login from "@/features/pages/Auth/Login";
+import Register from "@/features/pages/Auth/Register";
 
 /**
  * Page affichée lorsqu'aucune route ne correspond.
@@ -51,6 +57,14 @@ function NotFoundPage() {
  * DashboardLayout avec sidebar et navbar.
  */
 function AppLayout({ children }) {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  async function handleLogout() {
+    await logout();
+    navigate("/login", { replace: true });
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
@@ -69,6 +83,22 @@ function AppLayout({ children }) {
             >
               Évaluations
             </a>
+
+            {user && (
+              <>
+                <span className="text-sm text-muted-foreground">
+                  {user.firstName} {user.lastName}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="text-sm font-medium text-muted-foreground transition hover:text-foreground"
+                >
+                  Déconnexion
+                </button>
+              </>
+            )}
           </nav>
         </div>
       </header>
@@ -80,106 +110,162 @@ function AppLayout({ children }) {
   );
 }
 
-export default function App() {
+/**
+ * Protège une route : redirige vers /login si l'utilisateur
+ * n'est pas authentifié.
+ */
+function RequireAuth({ children }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Chargement...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: location.pathname }}
+      />
+    );
+  }
+
+  return children;
+}
+
+function AppRoutes() {
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Redirection de la racine */}
+    <Routes>
+      {/* Redirection de la racine */}
 
-        <Route
-          path="/"
-          element={
-            <Navigate
-              to="/evaluations"
-              replace
-            />
-          }
-        />
+      <Route
+        path="/"
+        element={
+          <Navigate
+            to="/evaluations"
+            replace
+          />
+        }
+      />
 
-        {/* Liste des évaluations */}
+      {/* Authentification */}
 
-        <Route
-          path="/evaluations"
-          element={
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+
+      {/* Liste des évaluations */}
+
+      <Route
+        path="/evaluations"
+        element={
+          <RequireAuth>
             <AppLayout>
               <Evaluations />
             </AppLayout>
-          }
-        />
+          </RequireAuth>
+        }
+      />
 
-        {/* Choix du type et du mode de création */}
+      {/* Choix du type et du mode de création */}
 
-        <Route
-          path="/evaluations/create"
-          element={
+      <Route
+        path="/evaluations/create"
+        element={
+          <RequireAuth>
             <AppLayout>
               <CreateChoice />
             </AppLayout>
-          }
-        />
+          </RequireAuth>
+        }
+      />
 
-        {/* Création manuelle */}
+      {/* Création manuelle */}
 
-        <Route
-          path="/evaluations/create/manual"
-          element={
+      <Route
+        path="/evaluations/create/manual"
+        element={
+          <RequireAuth>
             <AppLayout>
               <ManualCreate />
             </AppLayout>
-          }
-        />
+          </RequireAuth>
+        }
+      />
 
-        {/* Création depuis un PDF */}
+      {/* Création depuis un PDF */}
 
-        <Route
-          path="/evaluations/create/pdf"
-          element={
+      <Route
+        path="/evaluations/create/pdf"
+        element={
+          <RequireAuth>
             <AppLayout>
               <PdfImport />
             </AppLayout>
-          }
-        />
+          </RequireAuth>
+        }
+      />
 
-        {/* Création avec l'IA */}
+      {/* Création avec l'IA */}
 
-        <Route
-          path="/evaluations/create/ai"
-          element={
+      <Route
+        path="/evaluations/create/ai"
+        element={
+          <RequireAuth>
             <AppLayout>
               <AiCreate />
             </AppLayout>
-          }
-        />
+          </RequireAuth>
+        }
+      />
 
-        {/* Modification d'une évaluation */}
+      {/* Modification d'une évaluation */}
 
-        <Route
-          path="/evaluations/:id/edit"
-          element={
+      <Route
+        path="/evaluations/:id/edit"
+        element={
+          <RequireAuth>
             <AppLayout>
               <EvaluationEdit />
             </AppLayout>
-          }
-        />
+          </RequireAuth>
+        }
+      />
 
-        {/* Détails d'une évaluation */}
+      {/* Détails d'une évaluation */}
 
-        <Route
-          path="/evaluations/:id"
-          element={
+      <Route
+        path="/evaluations/:id"
+        element={
+          <RequireAuth>
             <AppLayout>
               <EvaluationDetails />
             </AppLayout>
-          }
-        />
+          </RequireAuth>
+        }
+      />
 
-        {/* Page inexistante */}
+      {/* Page inexistante */}
 
-        <Route
-          path="*"
-          element={<NotFoundPage />}
-        />
-      </Routes>
+      <Route
+        path="*"
+        element={<NotFoundPage />}
+      />
+    </Routes>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
     </BrowserRouter>
   );
 }

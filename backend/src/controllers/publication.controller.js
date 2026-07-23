@@ -92,6 +92,7 @@ async function create(req, res, next) {
     const publication =
       await publicationService.createPublication(
         req.params.evaluationId,
+        req.userId,
         req.body
       );
 
@@ -112,7 +113,7 @@ async function create(req, res, next) {
 async function getAll(req, res, next) {
   try {
     const publications =
-      await publicationService.getPublications();
+      await publicationService.getPublications(req.userId);
 
     return res.json(publications);
   } catch (error) {
@@ -128,7 +129,8 @@ async function getByEvaluation(
   try {
     const publications =
       await publicationService.getPublicationsByEvaluation(
-        req.params.evaluationId
+        req.params.evaluationId,
+        req.userId
       );
 
     return res.json(publications);
@@ -141,7 +143,8 @@ async function getOne(req, res, next) {
   try {
     const publication =
       await publicationService.getPublicationById(
-        req.params.id
+        req.params.id,
+        req.userId
       );
 
     if (!publication) {
@@ -229,6 +232,7 @@ async function update(req, res, next) {
     const publication =
       await publicationService.updatePublication(
         req.params.id,
+        req.userId,
         req.body
       );
 
@@ -262,6 +266,7 @@ async function updateStatus(
     const publication =
       await publicationService.updatePublicationStatus(
         req.params.id,
+        req.userId,
         status
       );
 
@@ -285,7 +290,8 @@ async function regenerateCode(
   try {
     const publication =
       await publicationService.regeneratePublicationCode(
-        req.params.id
+        req.params.id,
+        req.userId
       );
 
     if (!publication) {
@@ -304,7 +310,8 @@ async function duplicate(req, res, next) {
   try {
     const publication =
       await publicationService.duplicatePublication(
-        req.params.id
+        req.params.id,
+        req.userId
       );
 
     if (!publication) {
@@ -325,7 +332,8 @@ async function remove(req, res, next) {
   try {
     const publication =
       await publicationService.deletePublication(
-        req.params.id
+        req.params.id,
+        req.userId
       );
 
     if (!publication) {

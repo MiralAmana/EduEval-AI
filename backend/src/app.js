@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
+const cookieParser = require("cookie-parser");
 
+const authRoutes = require("./routes/auth.routes");
 const aiRoutes = require("./routes/ai.routes");
 const pdfRoutes = require("./routes/pdf.routes");
 const wordRoutes = require("./routes/word.routes");
@@ -22,11 +24,13 @@ app.use(
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 app.get("/", (req, res) => {
   res.send("Serveur EduEval AI démarré");
 });
 
+app.use("/api/auth", authRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/pdf", pdfRoutes);
 app.use("/api/word", wordRoutes);

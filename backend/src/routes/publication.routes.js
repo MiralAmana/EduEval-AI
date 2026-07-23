@@ -3,17 +3,20 @@ const express = require("express");
 const controller = require(
   "../controllers/publication.controller"
 );
+const { requireAuth } = require("../middleware/auth.middleware");
 
 const router = express.Router();
 
 router.get(
-  "/",
-  controller.getAll
-);
-
-router.get(
   "/code/:code",
   controller.getByCode
+);
+
+router.use(requireAuth);
+
+router.get(
+  "/",
+  controller.getAll
 );
 
 router.get(

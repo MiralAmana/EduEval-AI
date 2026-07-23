@@ -67,10 +67,11 @@ const publicationInclude = {
   },
 };
 
-async function createPublication(evaluationId, data) {
-  const evaluation = await prisma.evaluation.findUnique({
+async function createPublication(evaluationId, userId, data) {
+  const evaluation = await prisma.evaluation.findFirst({
     where: {
       id: evaluationId,
+      userId,
     },
 
     select: {
@@ -115,8 +116,14 @@ async function createPublication(evaluationId, data) {
   });
 }
 
-async function getPublications() {
+async function getPublications(userId) {
   return prisma.publication.findMany({
+    where: {
+      evaluation: {
+        userId,
+      },
+    },
+
     orderBy: {
       createdAt: "desc",
     },
@@ -125,10 +132,13 @@ async function getPublications() {
   });
 }
 
-async function getPublicationsByEvaluation(evaluationId) {
+async function getPublicationsByEvaluation(evaluationId, userId) {
   return prisma.publication.findMany({
     where: {
       evaluationId,
+      evaluation: {
+        userId,
+      },
     },
 
     orderBy: {
@@ -139,10 +149,13 @@ async function getPublicationsByEvaluation(evaluationId) {
   });
 }
 
-async function getPublicationById(id) {
-  return prisma.publication.findUnique({
+async function getPublicationById(id, userId) {
+  return prisma.publication.findFirst({
     where: {
       id,
+      evaluation: {
+        userId,
+      },
     },
 
     include: publicationInclude,
@@ -159,11 +172,14 @@ async function getPublicationByCode(code) {
   });
 }
 
-async function updatePublication(id, data) {
+async function updatePublication(id, userId, data) {
   const existingPublication =
-    await prisma.publication.findUnique({
+    await prisma.publication.findFirst({
       where: {
         id,
+        evaluation: {
+          userId,
+        },
       },
 
       select: {
@@ -200,11 +216,14 @@ async function updatePublication(id, data) {
   });
 }
 
-async function updatePublicationStatus(id, status) {
+async function updatePublicationStatus(id, userId, status) {
   const existingPublication =
-    await prisma.publication.findUnique({
+    await prisma.publication.findFirst({
       where: {
         id,
+        evaluation: {
+          userId,
+        },
       },
 
       select: {
@@ -229,11 +248,14 @@ async function updatePublicationStatus(id, status) {
   });
 }
 
-async function regeneratePublicationCode(id) {
+async function regeneratePublicationCode(id, userId) {
   const existingPublication =
-    await prisma.publication.findUnique({
+    await prisma.publication.findFirst({
       where: {
         id,
+        evaluation: {
+          userId,
+        },
       },
 
       select: {
@@ -260,11 +282,14 @@ async function regeneratePublicationCode(id) {
   });
 }
 
-async function duplicatePublication(id) {
+async function duplicatePublication(id, userId) {
   const sourcePublication =
-    await prisma.publication.findUnique({
+    await prisma.publication.findFirst({
       where: {
         id,
+        evaluation: {
+          userId,
+        },
       },
     });
 
@@ -298,11 +323,14 @@ async function duplicatePublication(id) {
   });
 }
 
-async function deletePublication(id) {
+async function deletePublication(id, userId) {
   const existingPublication =
-    await prisma.publication.findUnique({
+    await prisma.publication.findFirst({
       where: {
         id,
+        evaluation: {
+          userId,
+        },
       },
 
       select: {

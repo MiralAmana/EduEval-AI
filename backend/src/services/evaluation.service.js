@@ -74,7 +74,7 @@ const evaluationInclude = {
   },
 };
 
-async function createEvaluation(data) {
+async function createEvaluation(data, userId) {
   const questions = Array.isArray(data.questions)
     ? data.questions
     : [];
@@ -88,6 +88,7 @@ async function createEvaluation(data) {
       contentType: data.contentType || "EVALUATION",
       type: data.type || "CLASSIC",
       status: data.status || "DRAFT",
+      userId,
 
       questions: {
         create: questions.map((question, index) =>
@@ -100,8 +101,12 @@ async function createEvaluation(data) {
   });
 }
 
-async function getEvaluations() {
+async function getEvaluations(userId) {
   return prisma.evaluation.findMany({
+    where: {
+      userId,
+    },
+
     orderBy: {
       createdAt: "desc",
     },
@@ -110,26 +115,28 @@ async function getEvaluations() {
   });
 }
 
-async function getEvaluationById(id) {
-  return prisma.evaluation.findUnique({
+async function getEvaluationById(id, userId) {
+  return prisma.evaluation.findFirst({
     where: {
       id,
+      userId,
     },
 
     include: evaluationInclude,
   });
 }
 
-async function updateEvaluation(id, data) {
+async function updateEvaluation(id, userId, data) {
   const questions = Array.isArray(data.questions)
     ? data.questions
     : null;
 
   return prisma.$transaction(async (transaction) => {
     const existingEvaluation =
-      await transaction.evaluation.findUnique({
+      await transaction.evaluation.findFirst({
         where: {
           id,
+          userId,
         },
 
         select: {
@@ -179,11 +186,12 @@ async function updateEvaluation(id, data) {
   });
 }
 
-async function deleteEvaluation(id) {
+async function deleteEvaluation(id, userId) {
   const existingEvaluation =
-    await prisma.evaluation.findUnique({
+    await prisma.evaluation.findFirst({
       where: {
         id,
+        userId,
       },
 
       select: {
@@ -202,11 +210,12 @@ async function deleteEvaluation(id) {
   });
 }
 
-async function updateEvaluationStatus(id, status) {
+async function updateEvaluationStatus(id, userId, status) {
   const existingEvaluation =
-    await prisma.evaluation.findUnique({
+    await prisma.evaluation.findFirst({
       where: {
         id,
+        userId,
       },
 
       select: {
@@ -231,11 +240,12 @@ async function updateEvaluationStatus(id, status) {
   });
 }
 
-async function duplicateEvaluation(id) {
+async function duplicateEvaluation(id, userId) {
   const sourceEvaluation =
-    await prisma.evaluation.findUnique({
+    await prisma.evaluation.findFirst({
       where: {
         id,
+        userId,
       },
 
       include: {
@@ -268,6 +278,7 @@ async function duplicateEvaluation(id) {
       contentType: sourceEvaluation.contentType,
       type: sourceEvaluation.type,
       status: "DRAFT",
+      userId,
 
       questions: {
         create: sourceEvaluation.questions.map((question) => ({
