@@ -15,6 +15,8 @@ const attemptRoutes = require("./routes/attempt.routes");
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 const allowedOrigins = (
   process.env.CORS_ORIGIN || "http://localhost:5173"
 )
