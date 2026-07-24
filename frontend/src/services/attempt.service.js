@@ -1,10 +1,4 @@
-import axios from "axios";
-
-const api = axios.create({
-  baseURL: "http://localhost:3000",
-  timeout: 30000,
-  withCredentials: true,
-});
+import api from "@/lib/apiClient";
 
 export async function joinEvaluation(payload) {
   const response = await api.post("/api/attempts/join", payload);
@@ -81,6 +75,19 @@ export async function publishResults(attemptId) {
   return response.data;
 }
 
-export function getAnswerFileUrl(attemptId, questionId) {
-  return `http://localhost:3000/api/attempts/${attemptId}/answers/${questionId}/file`;
+export async function downloadAnswerFile(attemptId, questionId, fileName) {
+  const response = await api.get(
+    `/api/attempts/${attemptId}/answers/${questionId}/file`,
+    { responseType: "blob" }
+  );
+
+  const url = window.URL.createObjectURL(response.data);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = fileName || "fichier";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }

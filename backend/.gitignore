@@ -3,3 +3,7 @@ node_modules
 .env
 
 /generated/prisma
+
+# Uploaded files (student answers, Word docs for correction test)
+uploads/*
+!uploads/.gitkeep

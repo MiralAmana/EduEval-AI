@@ -5,6 +5,7 @@ import {
   useState,
 } from "react";
 
+import { getStoredToken } from "@/lib/apiClient";
 import {
   getCurrentUser,
   loginUser,
@@ -19,6 +20,11 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!getStoredToken()) {
+      setLoading(false);
+      return;
+    }
+
     getCurrentUser()
       .then(({ user: currentUser }) => setUser(currentUser))
       .catch(() => setUser(null))

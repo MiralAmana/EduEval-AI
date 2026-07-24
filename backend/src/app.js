@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const cookieParser = require("cookie-parser");
 
 const authRoutes = require("./routes/auth.routes");
 const aiRoutes = require("./routes/ai.routes");
@@ -16,16 +15,21 @@ const attemptRoutes = require("./routes/attempt.routes");
 
 const app = express();
 
+const allowedOrigins = (
+  process.env.CORS_ORIGIN || "http://localhost:5173"
+)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: "http://localhost:5173",
-    credentials: true,
+    origin: allowedOrigins,
   })
 );
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 
 app.get("/", (req, res) => {
   res.send("Serveur EduEval AI démarré");

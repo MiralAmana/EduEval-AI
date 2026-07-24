@@ -1,10 +1,4 @@
-import axios from "axios";
-
-const api = axios.create({
-  baseURL: "http://localhost:3000",
-  timeout: 30000,
-  withCredentials: true,
-});
+import api from "@/lib/apiClient";
 
 export async function createEvaluation(payload) {
   console.log(

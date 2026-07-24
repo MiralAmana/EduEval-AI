@@ -1,16 +1,4 @@
 const authService = require("../services/auth.service");
-const { COOKIE_NAME } = require("../middleware/auth.middleware");
-
-const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
-function cookieOptions() {
-  return {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: COOKIE_MAX_AGE_MS,
-  };
-}
 
 function validateRegisterPayload({ firstName, lastName, email, password }) {
   if (!firstName || !String(firstName).trim()) {
@@ -44,9 +32,7 @@ async function register(req, res, next) {
 
     const { user, token } = await authService.register(req.body);
 
-    res.cookie(COOKIE_NAME, token, cookieOptions());
-
-    return res.status(201).json({ user });
+    return res.status(201).json({ user, token });
   } catch (error) {
     return next(error);
   }
@@ -67,21 +53,13 @@ async function login(req, res, next) {
       password,
     });
 
-    res.cookie(COOKIE_NAME, token, cookieOptions());
-
-    return res.json({ user });
+    return res.json({ user, token });
   } catch (error) {
     return next(error);
   }
 }
 
 function logout(req, res) {
-  res.clearCookie(COOKIE_NAME, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-  });
-
   return res.json({
     message: "Déconnexion réussie.",
   });

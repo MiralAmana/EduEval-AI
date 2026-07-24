@@ -26,7 +26,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  getAnswerFileUrl,
+  downloadAnswerFile,
   gradeAnswer,
   gradeAnswerWithAi,
   publishResults,
@@ -63,6 +63,7 @@ function QuestionReview({
 }) {
   const [score, setScore] = useState(question.answer?.score ?? "");
   const [feedback, setFeedback] = useState(question.answer?.feedback || "");
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     setScore(question.answer?.score ?? "");
@@ -149,15 +150,27 @@ function QuestionReview({
         {question.type === "FILE_UPLOAD" && (
           <div>
             {question.answer?.filePath ? (
-              <Button asChild size="sm" variant="outline">
-                <a
-                  href={getAnswerFileUrl(attemptId, question.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <Download className="size-4" />
-                  Télécharger le fichier
-                </a>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={downloading}
+                onClick={async () => {
+                  setDownloading(true);
+
+                  try {
+                    await downloadAnswerFile(
+                      attemptId,
+                      question.id,
+                      question.answer.fileName
+                    );
+                  } finally {
+                    setDownloading(false);
+                  }
+                }}
+              >
+                <Download className="size-4" />
+                {downloading ? "Téléchargement..." : "Télécharger le fichier"}
               </Button>
             ) : (
               <p className="text-sm text-muted-foreground">

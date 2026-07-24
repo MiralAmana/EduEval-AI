@@ -1,9 +1,10 @@
 const authService = require("../services/auth.service");
 
-const COOKIE_NAME = "token";
-
 function requireAuth(req, res, next) {
-  const token = req.cookies?.[COOKIE_NAME];
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : null;
 
   if (!token) {
     return res.status(401).json({
@@ -26,5 +27,4 @@ function requireAuth(req, res, next) {
 
 module.exports = {
   requireAuth,
-  COOKIE_NAME,
 };

@@ -1,10 +1,4 @@
-import axios from "axios";
-
-const api = axios.create({
-  baseURL: "http://localhost:3000",
-  timeout: 120000,
-  withCredentials: true,
-});
+import api from "@/lib/apiClient";
 
 export async function extractPdf(file) {
   const formData = new FormData();
@@ -13,7 +7,8 @@ export async function extractPdf(file) {
 
   const response = await api.post(
     "/api/pdf/extract",
-    formData
+    formData,
+    { timeout: 120000 }
   );
 
   return response.data;
