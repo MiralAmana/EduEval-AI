@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { BookOpenCheck } from "lucide-react";
+import { BookOpenCheck, Eye, EyeOff } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ function Login() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -81,13 +82,32 @@ function Login() {
 
               <div className="space-y-1.5">
                 <Label htmlFor="password">Mot de passe</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    className="pr-9"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground"
+                    aria-label={
+                      showPassword
+                        ? "Masquer le mot de passe"
+                        : "Afficher le mot de passe"
+                    }
+                  >
+                    {showPassword ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               {error && (

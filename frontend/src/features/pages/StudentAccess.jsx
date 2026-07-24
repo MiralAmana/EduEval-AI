@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { BookOpenCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -112,6 +112,13 @@ function StudentAccess() {
             </form>
           </CardContent>
         </Card>
+
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Vous êtes enseignant ?{" "}
+          <Link to="/login" className="font-medium text-primary">
+            Connectez-vous
+          </Link>
+        </p>
       </div>
     </main>
   );
