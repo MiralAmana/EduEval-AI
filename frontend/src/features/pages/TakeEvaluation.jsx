@@ -541,32 +541,6 @@ function TakeEvaluation() {
           </p>
         )}
 
-        {!isFullscreen && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
-            <div className="flex gap-3">
-              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
-
-              <div>
-                <p className="font-semibold">Vous avez quitté le plein écran</p>
-                <p className="text-muted-foreground">
-                  Cette sortie a été enregistrée. Revenez en plein écran pour
-                  continuer.
-                </p>
-              </div>
-            </div>
-
-            <Button
-              type="button"
-              size="sm"
-              variant="destructive"
-              onClick={requestFullscreen}
-            >
-              <Maximize className="size-4" />
-              Revenir en plein écran
-            </Button>
-          </div>
-        )}
-
         {data.attempt.exitCount > 0 && (
           <div className="flex gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
             <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
@@ -641,6 +615,41 @@ function TakeEvaluation() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {!isFullscreen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-6 backdrop-blur-sm">
+          <Card className="w-full max-w-md border-destructive/30">
+            <CardContent className="flex flex-col items-center p-8 text-center">
+              <div className="mb-5 flex size-14 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <AlertTriangle className="size-7" />
+              </div>
+
+              <h1 className="text-xl font-bold">
+                Vous avez quitté le plein écran
+              </h1>
+
+              <p className="mt-3 text-muted-foreground">
+                L’évaluation est bloquée tant que vous n’êtes pas revenu en
+                plein écran. Cette sortie a été enregistrée.
+              </p>
+
+              <Badge
+                className="mt-4"
+                variant={
+                  data.attempt.exitCount >= 2 ? "destructive" : "secondary"
+                }
+              >
+                Sorties : {data.attempt.exitCount}/3
+              </Badge>
+
+              <Button className="mt-6" onClick={requestFullscreen}>
+                <Maximize className="size-4" />
+                Revenir en plein écran
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </main>
   );
 }
