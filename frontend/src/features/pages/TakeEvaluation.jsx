@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   AlertTriangle,
   Check,
   Clock3,
   Loader2,
+  Maximize,
   ShieldAlert,
 } from "lucide-react";
 
@@ -38,6 +39,35 @@ const QUESTION_POINTS_LABEL = (points) =>
   `${points} point${points > 1 ? "s" : ""}`;
 
 const LOW_TIME_THRESHOLD_SECONDS = 5 * 60;
+const EXIT_DEBOUNCE_MS = 1000;
+
+function getFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function requestFullscreen() {
+  const el = document.documentElement;
+  const request =
+    el.requestFullscreen?.bind(el) || el.webkitRequestFullscreen?.bind(el);
+
+  if (!request) {
+    return;
+  }
+
+  Promise.resolve(request()).catch(() => {});
+}
+
+function exitFullscreen() {
+  const exit =
+    document.exitFullscreen?.bind(document) ||
+    document.webkitExitFullscreen?.bind(document);
+
+  if (!exit || !getFullscreenElement()) {
+    return;
+  }
+
+  Promise.resolve(exit()).catch(() => {});
+}
 
 function isQuestionAnswered(question) {
   return Boolean(
@@ -153,6 +183,10 @@ function TakeEvaluation() {
   const [submitting, setSubmitting] = useState(false);
   const [savingId, setSavingId] = useState(null);
   const [confirmSubmitOpen, setConfirmSubmitOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(() =>
+    Boolean(getFullscreenElement())
+  );
+  const lastExitAtRef = useRef(0);
 
   const loadAttempt = useCallback(async () => {
     try {
@@ -239,20 +273,32 @@ function TakeEvaluation() {
     return true;
   }
 
+  const reportExit = useCallback(async () => {
+    const now = Date.now();
+
+    if (now - lastExitAtRef.current < EXIT_DEBOUNCE_MS) {
+      return;
+    }
+
+    lastExitAtRef.current = now;
+
+    try {
+      const payload = await registerExit(attemptId);
+
+      setData(payload);
+    } catch (exitError) {
+      handleUnavailable(exitError);
+    }
+  }, [attemptId]);
+
   useEffect(() => {
     if (!isInProgress) {
       return undefined;
     }
 
-    async function handleVisibilityChange() {
+    function handleVisibilityChange() {
       if (document.hidden) {
-        try {
-          const payload = await registerExit(attemptId);
-
-          setData(payload);
-        } catch (exitError) {
-          handleUnavailable(exitError);
-        }
+        reportExit();
       }
     }
 
@@ -264,7 +310,44 @@ function TakeEvaluation() {
         handleVisibilityChange
       );
     };
-  }, [isInProgress, attemptId]);
+  }, [isInProgress, reportExit]);
+
+  useEffect(() => {
+    if (!isInProgress) {
+      return undefined;
+    }
+
+    requestFullscreen();
+
+    function handleFullscreenChange() {
+      const active = Boolean(getFullscreenElement());
+
+      setIsFullscreen(active);
+
+      if (!active) {
+        reportExit();
+        requestFullscreen();
+      }
+    }
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener(
+      "webkitfullscreenchange",
+      handleFullscreenChange
+    );
+
+    return () => {
+      document.removeEventListener(
+        "fullscreenchange",
+        handleFullscreenChange
+      );
+      document.removeEventListener(
+        "webkitfullscreenchange",
+        handleFullscreenChange
+      );
+      exitFullscreen();
+    };
+  }, [isInProgress, reportExit]);
 
   async function handleChangeText(questionId, textAnswer) {
     setSavingId(questionId);
@@ -458,6 +541,32 @@ function TakeEvaluation() {
           </p>
         )}
 
+        {!isFullscreen && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+            <div className="flex gap-3">
+              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
+
+              <div>
+                <p className="font-semibold">Vous avez quitté le plein écran</p>
+                <p className="text-muted-foreground">
+                  Cette sortie a été enregistrée. Revenez en plein écran pour
+                  continuer.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              onClick={requestFullscreen}
+            >
+              <Maximize className="size-4" />
+              Revenir en plein écran
+            </Button>
+          </div>
+        )}
+
         {data.attempt.exitCount > 0 && (
           <div className="flex gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
             <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
@@ -465,8 +574,9 @@ function TakeEvaluation() {
             <div>
               <p className="font-semibold">Attention</p>
               <p className="text-muted-foreground">
-                Tout changement d’onglet est enregistré. À la troisième
-                sortie, votre tentative sera définitivement bloquée.
+                Tout changement d’onglet ou sortie du plein écran est
+                enregistré. À la troisième sortie, votre tentative sera
+                définitivement bloquée.
               </p>
             </div>
           </div>
