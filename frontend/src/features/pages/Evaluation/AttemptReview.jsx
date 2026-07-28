@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Check,
   Download,
+  Eye,
   Loader2,
   Sparkles,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   downloadAnswerFile,
+  getAnswerFilePreview,
   gradeAnswer,
   gradeAnswerWithAi,
   publishResults,
@@ -64,6 +66,9 @@ function QuestionReview({
   const [score, setScore] = useState(question.answer?.score ?? "");
   const [feedback, setFeedback] = useState(question.answer?.feedback || "");
   const [downloading, setDownloading] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewData, setPreviewData] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
 
   useEffect(() => {
     setScore(question.answer?.score ?? "");
@@ -148,30 +153,89 @@ function QuestionReview({
         )}
 
         {question.type === "FILE_UPLOAD" && (
-          <div>
+          <div className="space-y-3">
             {question.answer?.filePath ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={downloading}
-                onClick={async () => {
-                  setDownloading(true);
+              <>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={loadingPreview}
+                    onClick={async () => {
+                      const next = !previewOpen;
 
-                  try {
-                    await downloadAnswerFile(
-                      attemptId,
-                      question.id,
-                      question.answer.fileName
-                    );
-                  } finally {
-                    setDownloading(false);
-                  }
-                }}
-              >
-                <Download className="size-4" />
-                {downloading ? "Téléchargement..." : "Télécharger le fichier"}
-              </Button>
+                      setPreviewOpen(next);
+
+                      if (next && !previewData) {
+                        setLoadingPreview(true);
+
+                        try {
+                          const data = await getAnswerFilePreview(
+                            attemptId,
+                            question.id
+                          );
+
+                          setPreviewData(data);
+                        } catch {
+                          setPreviewData({ previewType: "unsupported" });
+                        } finally {
+                          setLoadingPreview(false);
+                        }
+                      }
+                    }}
+                  >
+                    <Eye className="size-4" />
+                    {loadingPreview
+                      ? "Chargement..."
+                      : previewOpen
+                        ? "Masquer l’aperçu"
+                        : "Voir le fichier"}
+                  </Button>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={downloading}
+                    onClick={async () => {
+                      setDownloading(true);
+
+                      try {
+                        await downloadAnswerFile(
+                          attemptId,
+                          question.id,
+                          question.answer.fileName
+                        );
+                      } finally {
+                        setDownloading(false);
+                      }
+                    }}
+                  >
+                    <Download className="size-4" />
+                    {downloading
+                      ? "Téléchargement..."
+                      : "Télécharger le fichier"}
+                  </Button>
+                </div>
+
+                {previewOpen && previewData && (
+                  <div className="rounded-lg border p-4">
+                    {previewData.previewType === "html" ? (
+                      <div
+                        className="max-h-[32rem] overflow-auto text-sm [&_table]:border-collapse [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:px-2 [&_th]:py-1"
+                        // eslint-disable-next-line react/no-danger
+                        dangerouslySetInnerHTML={{ __html: previewData.html }}
+                      />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Aperçu non disponible pour ce format — télécharge le
+                        fichier pour le consulter.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
             ) : (
               <p className="text-sm text-muted-foreground">
                 Aucun fichier envoyé.

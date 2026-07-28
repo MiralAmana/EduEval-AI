@@ -208,6 +208,13 @@ function TakeEvaluation() {
   }, [loadAttempt]);
 
   const isInProgress = data?.attempt.status === "IN_PROGRESS";
+  // Un examen composé uniquement de dépôts de fichier n'a pas besoin de
+  // plein écran/anti-triche : l'élève doit justement pouvoir sortir du
+  // navigateur pour préparer son fichier dans Word/Excel/PowerPoint.
+  const requiresIntegrityMode = !(
+    data?.questions?.length > 0 &&
+    data.questions.every((question) => question.type === "FILE_UPLOAD")
+  );
 
   useEffect(() => {
     if (!isInProgress) {
@@ -292,7 +299,7 @@ function TakeEvaluation() {
   }, [attemptId]);
 
   useEffect(() => {
-    if (!isInProgress) {
+    if (!isInProgress || !requiresIntegrityMode) {
       return undefined;
     }
 
@@ -310,10 +317,10 @@ function TakeEvaluation() {
         handleVisibilityChange
       );
     };
-  }, [isInProgress, reportExit]);
+  }, [isInProgress, requiresIntegrityMode, reportExit]);
 
   useEffect(() => {
-    if (!isInProgress) {
+    if (!isInProgress || !requiresIntegrityMode) {
       return undefined;
     }
 
@@ -347,7 +354,7 @@ function TakeEvaluation() {
       );
       exitFullscreen();
     };
-  }, [isInProgress, reportExit]);
+  }, [isInProgress, requiresIntegrityMode, reportExit]);
 
   async function handleChangeText(questionId, textAnswer) {
     setSavingId(questionId);
@@ -498,13 +505,15 @@ function TakeEvaluation() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Badge
-              variant={
-                data.attempt.exitCount >= 2 ? "destructive" : "secondary"
-              }
-            >
-              Sorties : {data.attempt.exitCount}/3
-            </Badge>
+            {requiresIntegrityMode && (
+              <Badge
+                variant={
+                  data.attempt.exitCount >= 2 ? "destructive" : "secondary"
+                }
+              >
+                Sorties : {data.attempt.exitCount}/3
+              </Badge>
+            )}
 
             <div
               className={[
@@ -541,7 +550,7 @@ function TakeEvaluation() {
           </p>
         )}
 
-        {data.attempt.exitCount > 0 && (
+        {requiresIntegrityMode && data.attempt.exitCount > 0 && (
           <div className="flex gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
             <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
 
@@ -616,7 +625,7 @@ function TakeEvaluation() {
         </DialogContent>
       </Dialog>
 
-      {!isFullscreen && (
+      {requiresIntegrityMode && !isFullscreen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-6 backdrop-blur-sm">
           <Card className="w-full max-w-md border-destructive/30">
             <CardContent className="flex flex-col items-center p-8 text-center">

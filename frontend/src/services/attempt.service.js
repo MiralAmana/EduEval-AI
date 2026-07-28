@@ -75,6 +75,14 @@ export async function publishResults(attemptId) {
   return response.data;
 }
 
+export async function getAnswerFilePreview(attemptId, questionId) {
+  const response = await api.get(
+    `/api/attempts/${attemptId}/answers/${questionId}/preview`
+  );
+
+  return response.data;
+}
+
 export async function downloadAnswerFile(attemptId, questionId, fileName) {
   const response = await api.get(
     `/api/attempts/${attemptId}/answers/${questionId}/file`,

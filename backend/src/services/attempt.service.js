@@ -1,6 +1,9 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
+const mammoth = require("mammoth");
+const XLSX = require("xlsx");
+
 const prisma = require("../lib/prisma");
 const { sanitizeQuestionsForStudent } = require("../lib/sanitize");
 const { gradeAnswerWithAI } = require("./grading.service");
@@ -283,6 +286,7 @@ function buildStudentPayload(attempt) {
 
     evaluation: {
       title: evaluation.title,
+      type: evaluation.type,
       instructions: evaluation.instructions,
       duration: attempt.publication.duration,
     },
@@ -375,6 +379,28 @@ async function joinPublication({ code, firstName, lastName, email }) {
   }
 
   return buildStudentPayload(attempt);
+}
+
+async function getAttemptEvaluationType(attemptId) {
+  const attempt = await prisma.attempt.findUnique({
+    where: {
+      id: attemptId,
+    },
+
+    select: {
+      publication: {
+        select: {
+          evaluation: {
+            select: {
+              type: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  return attempt?.publication.evaluation.type || null;
 }
 
 async function getAttempt(attemptId) {
@@ -796,9 +822,45 @@ async function getAnswerFileForTeacher(attemptId, questionId, userId) {
   };
 }
 
+async function getAnswerFilePreview(attemptId, questionId, userId) {
+  const attempt = await requireAttemptOwnedByTeacher(attemptId, userId);
+  const answer = attempt.answers.find(
+    (item) => item.questionId === questionId
+  );
+
+  if (!answer?.filePath) {
+    const error = new Error("Aucun fichier n’a été envoyé pour cette question.");
+    error.status = 404;
+    throw error;
+  }
+
+  const filePath = path.resolve(answer.filePath);
+  const extension = path
+    .extname(answer.fileName || answer.filePath)
+    .toLowerCase();
+
+  if (extension === ".doc" || extension === ".docx") {
+    const result = await mammoth.convertToHtml({ path: filePath });
+
+    return { previewType: "html", html: result.value };
+  }
+
+  if (extension === ".xls" || extension === ".xlsx") {
+    const workbook = XLSX.readFile(filePath);
+    const firstSheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[firstSheetName];
+    const html = XLSX.utils.sheet_to_html(sheet);
+
+    return { previewType: "html", html };
+  }
+
+  return { previewType: "unsupported" };
+}
+
 module.exports = {
   joinPublication,
   getAttempt,
+  getAttemptEvaluationType,
   saveTextAnswer,
   saveFileAnswer,
   registerExit,
@@ -808,4 +870,5 @@ module.exports = {
   gradeAnswerWithAiAssist,
   publishResults,
   getAnswerFileForTeacher,
+  getAnswerFilePreview,
 };

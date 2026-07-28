@@ -4,6 +4,7 @@ import {
   FileText,
   PenSquare,
   Sparkles,
+  Upload,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,13 @@ const creationMethods = [
       "Indiquez le sujet, le niveau et le nombre de questions à générer.",
     icon: Sparkles,
     path: "ai",
+  },
+  {
+    title: "Dépôt de fichier",
+    description:
+      "L’élève dépose un fichier Word, Excel ou PowerPoint — sans plein écran ni suivi anti-triche.",
+    icon: Upload,
+    path: "deposit",
   },
 ];
 

@@ -19,6 +19,7 @@ import AiCreate from "@/features/pages/Evaluation/AiCreate";
 import CreateChoice from "@/features/pages/Evaluation/CreateChoice";
 import EvaluationDetails from "@/features/pages/Evaluation/EvaluationDetails";
 import AttemptReview from "@/features/pages/Evaluation/AttemptReview";
+import FileDepositCreate from "@/features/pages/Evaluation/FileDepositCreate";
 import ManualCreate from "@/features/pages/Evaluation/ManualCreate";
 import PdfImport from "@/features/pages/Evaluation/PdfImport";
 import ForgotPassword from "@/features/pages/Auth/ForgotPassword";
@@ -241,6 +242,19 @@ function AppRoutes() {
           <RequireAuth>
             <AppLayout>
               <PdfImport />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+
+      {/* Création par dépôt de fichier (Word/Excel/PowerPoint) */}
+
+      <Route
+        path="/evaluations/create/deposit"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <FileDepositCreate />
             </AppLayout>
           </RequireAuth>
         }

@@ -4,6 +4,9 @@ const rateLimit = require("express-rate-limit");
 
 const controller = require("../controllers/attempt.controller");
 const { requireAuth } = require("../middleware/auth.middleware");
+const {
+  getAttemptEvaluationType,
+} = require("../services/attempt.service");
 
 const router = express.Router();
 
@@ -30,23 +33,69 @@ const ALLOWED_ANSWER_FILE_TYPES = new Set([
   "image/png",
 ]);
 
+const TYPE_SPECIFIC_ALLOWED_FILE_TYPES = {
+  WORD: {
+    mimeTypes: new Set([
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ]),
+    label: "Word (.doc, .docx)",
+  },
+
+  EXCEL: {
+    mimeTypes: new Set([
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ]),
+    label: "Excel (.xls, .xlsx)",
+  },
+
+  POWERPOINT: {
+    mimeTypes: new Set([
+      "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ]),
+    label: "PowerPoint (.ppt, .pptx)",
+  },
+};
+
 const answerUpload = multer({
   dest: "uploads/",
   limits: {
     fileSize: 10 * 1024 * 1024,
   },
 
-  fileFilter(req, file, callback) {
-    if (!ALLOWED_ANSWER_FILE_TYPES.has(file.mimetype)) {
-      const error = new Error(
-        "Type de fichier non autorisé. Formats acceptés : PDF, Word, Excel, PowerPoint, texte, JPG, PNG."
-      );
-      error.status = 400;
+  async fileFilter(req, file, callback) {
+    try {
+      const evaluationType = await getAttemptEvaluationType(req.params.id);
+      const typeConfig = TYPE_SPECIFIC_ALLOWED_FILE_TYPES[evaluationType];
 
+      if (typeConfig) {
+        if (!typeConfig.mimeTypes.has(file.mimetype)) {
+          const error = new Error(
+            `Cette évaluation nécessite un fichier ${typeConfig.label}.`
+          );
+          error.status = 400;
+
+          return callback(error);
+        }
+
+        return callback(null, true);
+      }
+
+      if (!ALLOWED_ANSWER_FILE_TYPES.has(file.mimetype)) {
+        const error = new Error(
+          "Type de fichier non autorisé. Formats acceptés : PDF, Word, Excel, PowerPoint, texte, JPG, PNG."
+        );
+        error.status = 400;
+
+        return callback(error);
+      }
+
+      return callback(null, true);
+    } catch (error) {
       return callback(error);
     }
-
-    return callback(null, true);
   },
 });
 
@@ -80,6 +129,11 @@ router.get(
   "/:id/answers/:questionId/file",
   requireAuth,
   controller.downloadAnswerFile
+);
+router.get(
+  "/:id/answers/:questionId/preview",
+  requireAuth,
+  controller.previewAnswerFile
 );
 
 module.exports = router;

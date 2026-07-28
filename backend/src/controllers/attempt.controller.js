@@ -195,6 +195,20 @@ async function downloadAnswerFile(req, res, next) {
   }
 }
 
+async function previewAnswerFile(req, res, next) {
+  try {
+    const payload = await attemptService.getAnswerFilePreview(
+      req.params.id,
+      req.params.questionId,
+      req.userId
+    );
+
+    return res.json(payload);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   join,
   getOne,
@@ -207,4 +221,5 @@ module.exports = {
   gradeAnswerWithAi,
   publish,
   downloadAnswerFile,
+  previewAnswerFile,
 };

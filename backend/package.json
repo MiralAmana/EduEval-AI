@@ -25,7 +25,8 @@
     "openai": "^6.45.0",
     "pdf-parse": "^2.4.5",
     "pg": "^8.22.0",
-    "resend": "^6.18.0"
+    "resend": "^6.18.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-latest/xlsx-latest.tgz"
   },
   "devDependencies": {
     "prisma": "^7.8.0"
