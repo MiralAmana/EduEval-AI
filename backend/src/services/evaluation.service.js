@@ -107,18 +107,24 @@ async function ensureActivePublication(transaction, evaluation) {
     select: {
       id: true,
       status: true,
+      duration: true,
     },
   });
 
   if (existingPublication) {
-    if (existingPublication.status !== "ACTIVE") {
+    const needsStatusUpdate = existingPublication.status !== "ACTIVE";
+    const needsDurationSync =
+      existingPublication.duration !== evaluation.duration;
+
+    if (needsStatusUpdate || needsDurationSync) {
       await transaction.publication.update({
         where: {
           id: existingPublication.id,
         },
 
         data: {
-          status: "ACTIVE",
+          ...(needsStatusUpdate ? { status: "ACTIVE" } : {}),
+          ...(needsDurationSync ? { duration: evaluation.duration } : {}),
         },
       });
     }
