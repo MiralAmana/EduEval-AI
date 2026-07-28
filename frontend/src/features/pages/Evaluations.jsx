@@ -36,6 +36,7 @@ export default function Evaluations() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
+  const [sortBy, setSortBy] = useState("RECENT");
 
   const [deleteDialogOpen, setDeleteDialogOpen] =
     useState(false);
@@ -86,7 +87,7 @@ export default function Evaluations() {
       .trim()
       .toLowerCase();
 
-    return evaluations.filter((evaluation) => {
+    const filtered = evaluations.filter((evaluation) => {
       const matchesSearch =
         normalizedSearch === "" ||
         evaluation.title
@@ -113,11 +114,24 @@ export default function Evaluations() {
         matchesType
       );
     });
+
+    if (sortBy === "NAME_ASC" || sortBy === "NAME_DESC") {
+      const sorted = [...filtered].sort((a, b) =>
+        (a.title || "").localeCompare(b.title || "", "fr", {
+          sensitivity: "base",
+        })
+      );
+
+      return sortBy === "NAME_DESC" ? sorted.reverse() : sorted;
+    }
+
+    return filtered;
   }, [
     evaluations,
     search,
     statusFilter,
     typeFilter,
+    sortBy,
   ]);
 
   const statistics = useMemo(() => {
@@ -392,9 +406,11 @@ export default function Evaluations() {
         search={search}
         status={statusFilter}
         type={typeFilter}
+        sortBy={sortBy}
         onSearchChange={setSearch}
         onStatusChange={setStatusFilter}
         onTypeChange={setTypeFilter}
+        onSortByChange={setSortBy}
         onReset={resetFilters}
       />
 

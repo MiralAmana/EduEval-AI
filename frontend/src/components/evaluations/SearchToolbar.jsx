@@ -20,13 +20,21 @@ const typeOptions = [
   { value: "MIXED", label: "Mixte" },
 ];
 
+const sortOptions = [
+  { value: "RECENT", label: "Plus récentes" },
+  { value: "NAME_ASC", label: "Nom (A → Z)" },
+  { value: "NAME_DESC", label: "Nom (Z → A)" },
+];
+
 export default function SearchToolbar({
   search,
   status,
   type,
+  sortBy,
   onSearchChange,
   onStatusChange,
   onTypeChange,
+  onSortByChange,
   onReset,
 }) {
   const hasFilters =
@@ -80,6 +88,23 @@ export default function SearchToolbar({
             className="h-9 min-w-48 rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           >
             {typeOptions.map((option) => (
+              <option
+                key={option.value}
+                value={option.value}
+              >
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={sortBy}
+            onChange={(event) =>
+              onSortByChange(event.target.value)
+            }
+            className="h-9 min-w-48 rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+          >
+            {sortOptions.map((option) => (
               <option
                 key={option.value}
                 value={option.value}

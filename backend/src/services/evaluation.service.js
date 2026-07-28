@@ -39,6 +39,14 @@ function prepareQuestion(question, position) {
 }
 
 const evaluationInclude = {
+  user: {
+    select: {
+      firstName: true,
+      lastName: true,
+      email: true,
+    },
+  },
+
   questions: {
     orderBy: {
       position: "asc",

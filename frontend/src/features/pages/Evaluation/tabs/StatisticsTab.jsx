@@ -4,6 +4,7 @@ import {
   BarChart3,
   CheckCircle2,
   Clock3,
+  Download,
   FileCheck2,
   Target,
   TrendingUp,
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/card";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 /**
  * Convertit une valeur en nombre exploitable.
@@ -288,6 +290,99 @@ function getStudentName(attempt) {
     student.email ||
     "Étudiant inconnu"
   );
+}
+
+/**
+ * Échappe une valeur pour un champ CSV (RFC 4180).
+ */
+function csvEscape(value) {
+  const stringValue = String(value ?? "");
+
+  if (/[",\n]/.test(stringValue)) {
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  }
+
+  return stringValue;
+}
+
+/**
+ * Construit les lignes du CSV des résultats (en-tête inclus).
+ */
+function buildResultsCsvRows(sortedAttempts, maximumScore, passingScore) {
+  const header = [
+    "Rang",
+    "Étudiant",
+    "Email",
+    "Note",
+    "Sur",
+    "Pourcentage",
+    "Durée (min)",
+    "Statut",
+    "Soumis le",
+  ];
+
+  const rows = sortedAttempts.map((attempt, index) => {
+    const completed = isAttemptCompleted(attempt);
+    const score = getAttemptScore(attempt);
+    const percentage =
+      maximumScore > 0 ? (score / maximumScore) * 100 : 0;
+    const passed = completed && score >= passingScore;
+    const submittedAt =
+      attempt?.submittedAt ||
+      attempt?.completedAt ||
+      attempt?.finishedAt;
+
+    return [
+      index + 1,
+      getStudentName(attempt),
+      attempt?.student?.email || "",
+      completed ? score : "",
+      maximumScore,
+      completed ? percentage.toFixed(1) : "",
+      (getAttemptDuration(attempt) / 60).toFixed(1),
+      completed ? (passed ? "Réussi" : "Échoué") : "En cours",
+      submittedAt
+        ? new Date(submittedAt).toLocaleString("fr-FR")
+        : "",
+    ];
+  });
+
+  return [header, ...rows];
+}
+
+/**
+ * Déclenche le téléchargement du CSV des résultats.
+ */
+function downloadResultsCsv(evaluation, sortedAttempts, maximumScore, passingScore) {
+  const rows = buildResultsCsvRows(
+    sortedAttempts,
+    maximumScore,
+    passingScore
+  );
+
+  const csvContent = rows
+    .map((row) => row.map(csvEscape).join(","))
+    .join("\r\n");
+
+  // Le BOM UTF-8 assure un affichage correct des accents dans Excel.
+  const blob = new Blob(["﻿" + csvContent], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const fileSlug = (evaluation?.title || "evaluation")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = `resultats-${fileSlug || "evaluation"}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 /**
@@ -807,12 +902,31 @@ export default function StatisticsTab({
               </p>
             </div>
 
-            <Badge variant="secondary">
-              {totalAttempts} tentative
-              {totalAttempts > 1
-                ? "s"
-                : ""}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">
+                {totalAttempts} tentative
+                {totalAttempts > 1
+                  ? "s"
+                  : ""}
+              </Badge>
+
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  downloadResultsCsv(
+                    evaluation,
+                    sortedAttempts,
+                    maximumScore,
+                    passingScore
+                  )
+                }
+              >
+                <Download className="size-4" />
+                Exporter en CSV
+              </Button>
+            </div>
           </div>
         </CardHeader>
 
