@@ -31,6 +31,7 @@ router.post("/generate-evaluation", async (req, res, next) => {
       objectives,
       duration,
       contentType,
+      totalPoints,
     } = req.body || {};
 
     if (!subject || !String(subject).trim()) {
@@ -48,6 +49,17 @@ router.post("/generate-evaluation", async (req, res, next) => {
       });
     }
 
+    const targetTotalPoints =
+      totalPoints !== undefined && totalPoints !== null && totalPoints !== ""
+        ? Number(totalPoints)
+        : null;
+
+    if (targetTotalPoints !== null && targetTotalPoints <= 0) {
+      return res.status(400).json({
+        message: "Le barème total doit être supérieur à zéro.",
+      });
+    }
+
     const prompt = `
 Crée un ${
       contentType === "EXERCISE"
@@ -62,6 +74,10 @@ Type souhaité : ${questionType || "MIXED"}
 Durée : ${Number(duration) || 60} minutes
 Objectifs pédagogiques : ${
       objectives || "Non précisés"
+    }${
+      targetTotalPoints !== null
+        ? `\nBarème total : l'évaluation doit être notée sur exactement ${targetTotalPoints} points au total.`
+        : ""
     }
 
 Retourne exactement cette structure JSON :
@@ -102,7 +118,11 @@ Règles :
 - Une seule réponse doit être correcte dans chaque QCM.
 - Pour une question non-QCM, utilise choices: [].
 - Fournis toujours une bonne réponse ou un corrigé.
-- Attribue un nombre de points cohérent.
+- Attribue un nombre de points cohérent${
+      targetTotalPoints !== null
+        ? ` : la somme des points de toutes les questions doit être exactement égale à ${targetTotalPoints}.`
+        : "."
+    }
 - Ne retourne aucun texte en dehors du JSON.
 `;
 
@@ -165,6 +185,44 @@ Règles :
         };
       }
     );
+
+    // Filet de sécurité : l'IA respecte rarement le barème demandé au
+    // point près, donc on rééquilibre les points proportionnellement
+    // pour garantir une somme exacte.
+    if (targetTotalPoints !== null) {
+      const currentTotal = questions.reduce(
+        (sum, question) => sum + question.points,
+        0
+      );
+
+      if (Math.abs(currentTotal - targetTotalPoints) > 0.01) {
+        const scale = targetTotalPoints / currentTotal;
+
+        questions.forEach((question) => {
+          question.points =
+            Math.round(question.points * scale * 10) / 10;
+        });
+
+        const rescaledTotal = questions.reduce(
+          (sum, question) => sum + question.points,
+          0
+        );
+
+        const roundingDrift =
+          Math.round((targetTotalPoints - rescaledTotal) * 10) / 10;
+
+        if (roundingDrift !== 0) {
+          const lastQuestion = questions[questions.length - 1];
+
+          lastQuestion.points = Math.max(
+            0,
+            Math.round(
+              (lastQuestion.points + roundingDrift) * 10
+            ) / 10
+          );
+        }
+      }
+    }
 
     return res.json({
       message: "Évaluation générée avec succès.",

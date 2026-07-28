@@ -148,6 +148,7 @@ export default function AiCreate() {
     questionType: "MIXED",
     objectives: "",
     duration: 60,
+    totalPoints: 20,
   });
 
   const [generatedData, setGeneratedData] = useState(null);
@@ -252,6 +253,7 @@ export default function AiCreate() {
         questionType: form.questionType,
         objectives: form.objectives,
         duration: Number(form.duration),
+        totalPoints: Number(form.totalPoints),
         contentType,
       });
 
@@ -505,6 +507,13 @@ export default function AiCreate() {
     }
   }
 
+  const currentTotalPoints = (
+    generatedData?.questions || []
+  ).reduce(
+    (sum, question) => sum + (Number(question.points) || 0),
+    0
+  );
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
@@ -631,7 +640,7 @@ export default function AiCreate() {
               </div>
             )}
 
-            <div className="grid gap-5 md:grid-cols-3">
+            <div className="grid gap-5 md:grid-cols-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium">
                   Niveau
@@ -684,6 +693,21 @@ export default function AiCreate() {
                   min="1"
                   name="duration"
                   value={form.duration}
+                  onChange={updateForm}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Noté sur combien de points
+                </label>
+
+                <Input
+                  type="number"
+                  min="1"
+                  step="0.5"
+                  name="totalPoints"
+                  value={form.totalPoints}
                   onChange={updateForm}
                 />
               </div>
@@ -857,9 +881,26 @@ export default function AiCreate() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-4">
-              <CardTitle>
-                Questions générées
-              </CardTitle>
+              <div>
+                <CardTitle>
+                  Questions générées
+                </CardTitle>
+
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Total actuel :{" "}
+                  <span
+                    className={
+                      currentTotalPoints !==
+                      Number(form.totalPoints)
+                        ? "font-semibold text-destructive"
+                        : "font-semibold text-foreground"
+                    }
+                  >
+                    {currentTotalPoints}
+                  </span>{" "}
+                  / {form.totalPoints} points
+                </p>
+              </div>
 
               <Button
                 type="button"
