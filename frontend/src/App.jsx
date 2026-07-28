@@ -21,8 +21,10 @@ import EvaluationDetails from "@/features/pages/Evaluation/EvaluationDetails";
 import AttemptReview from "@/features/pages/Evaluation/AttemptReview";
 import ManualCreate from "@/features/pages/Evaluation/ManualCreate";
 import PdfImport from "@/features/pages/Evaluation/PdfImport";
+import ForgotPassword from "@/features/pages/Auth/ForgotPassword";
 import Login from "@/features/pages/Auth/Login";
 import Register from "@/features/pages/Auth/Register";
+import ResetPassword from "@/features/pages/Auth/ResetPassword";
 import StudentAccess from "@/features/pages/StudentAccess";
 import TakeEvaluation from "@/features/pages/TakeEvaluation";
 
@@ -171,6 +173,8 @@ function AppRoutes() {
 
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Accès étudiant */}
 

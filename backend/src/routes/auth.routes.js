@@ -26,9 +26,25 @@ const loginLimiter = rateLimit({
   },
 });
 
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    message: "Trop de demandes de réinitialisation. Réessaie plus tard.",
+  },
+});
+
 router.post("/register", registerLimiter, controller.register);
 router.post("/login", loginLimiter, controller.login);
 router.post("/logout", controller.logout);
 router.get("/me", requireAuth, controller.me);
+router.post(
+  "/forgot-password",
+  forgotPasswordLimiter,
+  controller.forgotPassword
+);
+router.post("/reset-password", controller.resetPassword);
 
 module.exports = router;

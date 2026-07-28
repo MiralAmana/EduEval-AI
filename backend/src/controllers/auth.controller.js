@@ -1,5 +1,9 @@
 const authService = require("../services/auth.service");
 
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || "").trim());
+}
+
 function validateRegisterPayload({ firstName, lastName, email, password }) {
   if (!firstName || !String(firstName).trim()) {
     return "Le prénom est obligatoire.";
@@ -9,7 +13,7 @@ function validateRegisterPayload({ firstName, lastName, email, password }) {
     return "Le nom est obligatoire.";
   }
 
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
+  if (!email || !isValidEmail(email)) {
     return "L’email est invalide.";
   }
 
@@ -81,9 +85,58 @@ async function me(req, res, next) {
   }
 }
 
+async function forgotPassword(req, res, next) {
+  try {
+    const { email } = req.body || {};
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        message: "L’email est invalide.",
+      });
+    }
+
+    await authService.requestPasswordReset(email);
+
+    return res.json({
+      message:
+        "Si un compte existe avec cet email, un lien de réinitialisation vient d’être envoyé.",
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function resetPassword(req, res, next) {
+  try {
+    const { token, password } = req.body || {};
+
+    if (!token) {
+      return res.status(400).json({
+        message: "Le lien de réinitialisation est invalide.",
+      });
+    }
+
+    if (!password || String(password).length < 8) {
+      return res.status(400).json({
+        message: "Le mot de passe doit contenir au moins 8 caractères.",
+      });
+    }
+
+    await authService.resetPassword(token, password);
+
+    return res.json({
+      message: "Mot de passe mis à jour.",
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   register,
   login,
   logout,
   me,
+  forgotPassword,
+  resetPassword,
 };

@@ -114,9 +114,24 @@ function Login() {
                 <p className="text-sm text-destructive">{error}</p>
               )}
 
+              {!error && location.state?.message && (
+                <p className="text-sm text-emerald-600">
+                  {location.state.message}
+                </p>
+              )}
+
               <Button className="w-full" type="submit" disabled={submitting}>
                 {submitting ? "Connexion..." : "Se connecter"}
               </Button>
+
+              <p className="text-center text-sm">
+                <Link
+                  to="/forgot-password"
+                  className="font-medium text-primary"
+                >
+                  Mot de passe oublié ?
+                </Link>
+              </p>
             </form>
 
             <p className="mt-4 text-center text-sm text-muted-foreground">
