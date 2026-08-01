@@ -4,7 +4,6 @@ const cors = require("cors");
 const authRoutes = require("./routes/auth.routes");
 const aiRoutes = require("./routes/ai.routes");
 const pdfRoutes = require("./routes/pdf.routes");
-const wordRoutes = require("./routes/word.routes");
 const evaluationRoutes = require(
   "./routes/evaluation.routes"
 );
@@ -40,7 +39,6 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/pdf", pdfRoutes);
-app.use("/api/word", wordRoutes);
 app.use("/api/evaluations", evaluationRoutes);
 app.use("/api/publications", publicationRoutes);
 app.use("/api/attempts", attemptRoutes);
