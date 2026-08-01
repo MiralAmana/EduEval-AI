@@ -1,6 +1,26 @@
 const { askAI } = require("./ai.service");
 
-async function gradeAnswerWithAI(question, textAnswer) {
+/**
+ * Résume les questions déjà corrigées sur la même copie, pour que
+ * l'IA applique un niveau d'exigence cohérent d'une question à
+ * l'autre plutôt que de noter chaque réponse dans l'isolement total.
+ */
+function formatPriorGrading(priorGrading) {
+  if (!priorGrading || priorGrading.length === 0) {
+    return "(Aucune autre question déjà corrigée sur cette copie.)";
+  }
+
+  return priorGrading
+    .map(
+      (item, index) =>
+        `${index + 1}. Question : ${item.statement}\n   Réponse de l’étudiant : ${
+          item.textAnswer?.trim() || "(Aucune réponse donnée)"
+        }\n   Note donnée : ${item.score} / ${item.points}`
+    )
+    .join("\n");
+}
+
+async function gradeAnswerWithAI(question, textAnswer, priorGrading = []) {
   const prompt = `
 Corrige la réponse d’un étudiant à une question d’évaluation.
 
@@ -12,6 +32,10 @@ Nombre de points maximum pour cette question : ${question.points}
 Réponse donnée par l’étudiant : ${
     textAnswer?.trim() || "(Aucune réponse donnée)"
   }
+
+Corrections déjà effectuées sur cette même copie (reste cohérent avec
+le niveau d’exigence déjà appliqué) :
+${formatPriorGrading(priorGrading)}
 
 Retourne exactement ce JSON :
 

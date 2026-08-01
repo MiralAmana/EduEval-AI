@@ -82,7 +82,8 @@ async function saveFileAnswer(req, res, next) {
       req.params.id,
       req.params.questionId,
       req.file.path,
-      req.file.originalname
+      req.file.originalname,
+      req.file.mimetype
     );
 
     return res.json(payload);
@@ -182,14 +183,15 @@ async function publish(req, res, next) {
 
 async function downloadAnswerFile(req, res, next) {
   try {
-    const { filePath, fileName } =
+    const { buffer, fileName } =
       await attemptService.getAnswerFileForTeacher(
         req.params.id,
         req.params.questionId,
         req.userId
       );
 
-    return res.download(filePath, fileName);
+    res.attachment(fileName);
+    return res.send(buffer);
   } catch (error) {
     return next(error);
   }

@@ -5,9 +5,11 @@ const mammoth = require("mammoth");
 const XLSX = require("xlsx");
 
 const prisma = require("../lib/prisma");
+const attemptCache = require("../lib/attemptCache");
 const { sanitizeQuestionsForStudent } = require("../lib/sanitize");
 const { gradeAnswerWithAI } = require("./grading.service");
 const { sendResultsPublishedEmail } = require("./email.service");
+const storageService = require("./storage.service");
 
 const evaluationWithQuestionsInclude = {
   evaluation: {
@@ -108,24 +110,33 @@ async function gradeAttempt(attemptId, questions) {
   );
 
   let total = 0;
+  const updates = [];
 
   for (const question of questions) {
     const answer = answersByQuestionId.get(question.id);
     const score = gradeAnswer(question, answer);
 
     if (answer) {
-      await prisma.answer.update({
-        where: {
-          id: answer.id,
-        },
+      updates.push(
+        prisma.answer.update({
+          where: {
+            id: answer.id,
+          },
 
-        data: {
-          score,
-        },
-      });
+          data: {
+            score,
+          },
+        })
+      );
     }
 
     total += score || 0;
+  }
+
+  // Un seul aller-retour transactionnel plutôt qu'un update séquentiel
+  // par question.
+  if (updates.length > 0) {
+    await prisma.$transaction(updates);
   }
 
   return total;
@@ -180,6 +191,8 @@ async function finalizeAttempt(attempt, status, submittedAt) {
     },
   });
 
+  attemptCache.invalidate(attempt.id);
+
   if (resultsPublished) {
     await notifyResultsPublished(attempt, score, questions);
   }
@@ -213,10 +226,18 @@ async function recomputeAttemptScore(attemptId, questions) {
       score: total,
     },
   });
+
+  attemptCache.invalidate(attemptId);
 }
 
 async function getAttemptWithContext(attemptId) {
-  return prisma.attempt.findUnique({
+  const cached = attemptCache.get(attemptId);
+
+  if (cached) {
+    return cached;
+  }
+
+  const attempt = await prisma.attempt.findUnique({
     where: {
       id: attemptId,
     },
@@ -229,6 +250,12 @@ async function getAttemptWithContext(attemptId) {
       },
     },
   });
+
+  if (attempt) {
+    attemptCache.set(attemptId, attempt);
+  }
+
+  return attempt;
 }
 
 /**
@@ -426,6 +453,25 @@ async function getAttempt(attemptId) {
   return buildStudentPayload(attempt);
 }
 
+/**
+ * Reconstruit localement l'attempt déjà chargé en mémoire avec une
+ * réponse ajoutée/modifiée, pour éviter de refaire un aller-retour
+ * complet en base après chaque sauvegarde (autosave à chaque frappe).
+ */
+function withUpdatedAnswer(attempt, answer) {
+  const hasAnswer = attempt.answers.some(
+    (item) => item.questionId === answer.questionId
+  );
+
+  const answers = hasAnswer
+    ? attempt.answers.map((item) =>
+        item.questionId === answer.questionId ? answer : item
+      )
+    : [...attempt.answers, answer];
+
+  return { ...attempt, answers };
+}
+
 async function requireActiveAttempt(attemptId) {
   let attempt = await getAttemptWithContext(attemptId);
 
@@ -469,7 +515,7 @@ async function saveTextAnswer(attemptId, questionId, textAnswer) {
     throw error;
   }
 
-  await prisma.answer.upsert({
+  const answer = await prisma.answer.upsert({
     where: {
       questionId_attemptId: {
         questionId,
@@ -488,10 +534,18 @@ async function saveTextAnswer(attemptId, questionId, textAnswer) {
     },
   });
 
-  return getAttempt(attemptId);
+  attemptCache.invalidate(attemptId);
+
+  return buildStudentPayload(withUpdatedAnswer(attempt, answer));
 }
 
-async function saveFileAnswer(attemptId, questionId, filePath, fileName) {
+async function saveFileAnswer(
+  attemptId,
+  questionId,
+  localFilePath,
+  fileName,
+  contentType
+) {
   const attempt = await requireActiveAttempt(attemptId);
 
   const question = attempt.publication.evaluation.questions.find(
@@ -508,11 +562,23 @@ async function saveFileAnswer(attemptId, questionId, filePath, fileName) {
     (answer) => answer.questionId === questionId
   );
 
+  // Le fichier reçu par multer n'est qu'un dépôt temporaire local :
+  // la copie durable vit sur le stockage objet (survit aux redéploiements), pas sur
+  // le disque de l'instance backend.
+  const objectKey = storageService.buildAnswerObjectKey(
+    attemptId,
+    questionId,
+    fileName
+  );
+
+  await storageService.uploadFile(localFilePath, objectKey, contentType);
+  await fs.unlink(localFilePath).catch(() => {});
+
   if (existingAnswer?.filePath) {
-    await fs.unlink(existingAnswer.filePath).catch(() => {});
+    await storageService.deleteFile(existingAnswer.filePath);
   }
 
-  await prisma.answer.upsert({
+  const answer = await prisma.answer.upsert({
     where: {
       questionId_attemptId: {
         questionId,
@@ -521,19 +587,21 @@ async function saveFileAnswer(attemptId, questionId, filePath, fileName) {
     },
 
     update: {
-      filePath,
+      filePath: objectKey,
       fileName,
     },
 
     create: {
       questionId,
       attemptId,
-      filePath,
+      filePath: objectKey,
       fileName,
     },
   });
 
-  return getAttempt(attemptId);
+  attemptCache.invalidate(attemptId);
+
+  return buildStudentPayload(withUpdatedAnswer(attempt, answer));
 }
 
 async function registerExit(attemptId) {
@@ -552,13 +620,17 @@ async function registerExit(attemptId) {
     },
   });
 
+  attemptCache.invalidate(attemptId);
+
   if (shouldBlock) {
     const refreshedAttempt = await getAttemptWithContext(attemptId);
 
     await finalizeAttempt(refreshedAttempt, "BLOCKED", new Date());
+
+    return getAttempt(attemptId);
   }
 
-  return getAttempt(attemptId);
+  return buildStudentPayload({ ...attempt, exitCount: nextExitCount });
 }
 
 async function submitAttempt(attemptId) {
@@ -721,6 +793,47 @@ async function gradeAnswerManually(
   return getAttemptForReview(attemptId, userId);
 }
 
+const MAX_PRIOR_GRADING_CONTEXT = 5;
+
+/**
+ * Résume les questions déjà notées (par un enseignant ou par l'IA) sur
+ * la même copie, pour que la correction IA d'une question reste
+ * cohérente avec le niveau d'exigence déjà appliqué aux précédentes.
+ * Bornée pour ne pas faire grossir le prompt sans limite sur les
+ * évaluations à beaucoup de questions rédigées.
+ */
+function buildGradingContext(attempt, currentQuestionId) {
+  const questionsById = new Map(
+    attempt.publication.evaluation.questions.map((question) => [
+      question.id,
+      question,
+    ])
+  );
+
+  return attempt.answers
+    .filter(
+      (answer) =>
+        answer.questionId !== currentQuestionId &&
+        answer.gradedBy &&
+        answer.score !== null &&
+        answer.score !== undefined
+    )
+    .map((answer) => {
+      const question = questionsById.get(answer.questionId);
+
+      return question
+        ? {
+            statement: question.statement,
+            points: question.points,
+            textAnswer: answer.textAnswer,
+            score: answer.score,
+          }
+        : null;
+    })
+    .filter(Boolean)
+    .slice(0, MAX_PRIOR_GRADING_CONTEXT);
+}
+
 async function gradeAnswerWithAiAssist(attemptId, questionId, userId) {
   const attempt = await requireAttemptOwnedByTeacher(attemptId, userId);
   const question = findQuestionOrThrow(attempt, questionId);
@@ -737,9 +850,12 @@ async function gradeAnswerWithAiAssist(attemptId, questionId, userId) {
     (answer) => answer.questionId === questionId
   );
 
+  const priorGrading = buildGradingContext(attempt, questionId);
+
   const { score, feedback } = await gradeAnswerWithAI(
     question,
-    existingAnswer?.textAnswer
+    existingAnswer?.textAnswer,
+    priorGrading
   );
 
   await prisma.answer.upsert({
@@ -795,6 +911,8 @@ async function publishResults(attemptId, userId) {
     },
   });
 
+  attemptCache.invalidate(attemptId);
+
   await notifyResultsPublished(
     attempt,
     attempt.score,
@@ -816,8 +934,10 @@ async function getAnswerFileForTeacher(attemptId, questionId, userId) {
     throw error;
   }
 
+  const buffer = await storageService.downloadFileBuffer(answer.filePath);
+
   return {
-    filePath: path.resolve(answer.filePath),
+    buffer,
     fileName: answer.fileName || path.basename(answer.filePath),
   };
 }
@@ -834,19 +954,20 @@ async function getAnswerFilePreview(attemptId, questionId, userId) {
     throw error;
   }
 
-  const filePath = path.resolve(answer.filePath);
   const extension = path
     .extname(answer.fileName || answer.filePath)
     .toLowerCase();
 
   if (extension === ".doc" || extension === ".docx") {
-    const result = await mammoth.convertToHtml({ path: filePath });
+    const buffer = await storageService.downloadFileBuffer(answer.filePath);
+    const result = await mammoth.convertToHtml({ buffer });
 
     return { previewType: "html", html: result.value };
   }
 
   if (extension === ".xls" || extension === ".xlsx") {
-    const workbook = XLSX.readFile(filePath);
+    const buffer = await storageService.downloadFileBuffer(answer.filePath);
+    const workbook = XLSX.read(buffer, { type: "buffer" });
     const firstSheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[firstSheetName];
     const html = XLSX.utils.sheet_to_html(sheet);
@@ -871,4 +992,12 @@ module.exports = {
   publishResults,
   getAnswerFileForTeacher,
   getAnswerFilePreview,
+
+  // Exportées pour les tests unitaires de la logique de notation
+  // (critique métier, voir backend/src/services/__tests__).
+  gradeAnswer,
+  isPureQcm,
+  gradeAttempt,
+  withUpdatedAnswer,
+  buildGradingContext,
 };

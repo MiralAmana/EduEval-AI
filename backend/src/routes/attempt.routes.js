@@ -20,6 +20,18 @@ const joinLimiter = rateLimit({
   },
 });
 
+// Les routes étudiantes n'étant pas authentifiées (voir commentaire
+// plus bas), elles restent exposées à un abus par IP sans limite dédiée.
+const attemptActionLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    message: "Trop de requêtes. Réessaie dans quelques instants.",
+  },
+});
+
 const ALLOWED_ANSWER_FILE_TYPES = new Set([
   "application/pdf",
   "application/msword",
@@ -102,15 +114,20 @@ const answerUpload = multer({
 // Routes publiques empruntées par les étudiants (l'identifiant de
 // tentative, imprévisible, fait office de jeton d'accès).
 router.post("/join", joinLimiter, controller.join);
-router.get("/:id", controller.getOne);
-router.put("/:id/answers/:questionId", controller.saveAnswer);
+router.get("/:id", attemptActionLimiter, controller.getOne);
+router.put(
+  "/:id/answers/:questionId",
+  attemptActionLimiter,
+  controller.saveAnswer
+);
 router.post(
   "/:id/answers/:questionId/file",
+  attemptActionLimiter,
   answerUpload.single("file"),
   controller.saveFileAnswer
 );
-router.post("/:id/exit", controller.exit);
-router.post("/:id/submit", controller.submit);
+router.post("/:id/exit", attemptActionLimiter, controller.exit);
+router.post("/:id/submit", attemptActionLimiter, controller.submit);
 
 // Routes de correction réservées à l'enseignant propriétaire.
 router.get("/:id/review", requireAuth, controller.review);
