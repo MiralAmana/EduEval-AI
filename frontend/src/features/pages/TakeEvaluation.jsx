@@ -40,6 +40,7 @@ const QUESTION_POINTS_LABEL = (points) =>
 
 const LOW_TIME_THRESHOLD_SECONDS = 5 * 60;
 const EXIT_DEBOUNCE_MS = 1000;
+const TEXT_AUTOSAVE_DEBOUNCE_MS = 800;
 
 function getFullscreenElement() {
   return document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -97,7 +98,15 @@ function SaveStatus({ saving, answered }) {
   return null;
 }
 
-function QuestionCard({ number, question, saving, onChangeText, onChangeFile }) {
+function QuestionCard({
+  number,
+  question,
+  saving,
+  onSelectChoice,
+  onTypeText,
+  onBlurText,
+  onChangeFile,
+}) {
   return (
     <Card>
       <CardHeader>
@@ -130,7 +139,7 @@ function QuestionCard({ number, question, saving, onChangeText, onChangeFile }) 
                   name={question.id}
                   value={choice.id}
                   checked={question.answer?.textAnswer === choice.id}
-                  onChange={() => onChangeText(choice.id)}
+                  onChange={() => onSelectChoice(choice.id)}
                 />
                 {choice.text}
               </label>
@@ -141,7 +150,8 @@ function QuestionCard({ number, question, saving, onChangeText, onChangeFile }) 
         {question.type === "SHORT_TEXT" && (
           <Input
             defaultValue={question.answer?.textAnswer || ""}
-            onBlur={(event) => onChangeText(event.target.value)}
+            onChange={(event) => onTypeText(event.target.value)}
+            onBlur={(event) => onBlurText(event.target.value)}
           />
         )}
 
@@ -150,7 +160,8 @@ function QuestionCard({ number, question, saving, onChangeText, onChangeFile }) 
             rows={5}
             placeholder="Écrivez votre réponse ici..."
             defaultValue={question.answer?.textAnswer || ""}
-            onBlur={(event) => onChangeText(event.target.value)}
+            onChange={(event) => onTypeText(event.target.value)}
+            onBlur={(event) => onBlurText(event.target.value)}
           />
         )}
 
@@ -187,6 +198,8 @@ function TakeEvaluation() {
     Boolean(getFullscreenElement())
   );
   const lastExitAtRef = useRef(0);
+  const saveTimersRef = useRef({});
+  const saveRequestSeqRef = useRef({});
 
   const loadAttempt = useCallback(async () => {
     try {
@@ -206,6 +219,14 @@ function TakeEvaluation() {
   useEffect(() => {
     loadAttempt();
   }, [loadAttempt]);
+
+  useEffect(() => {
+    const timers = saveTimersRef.current;
+
+    return () => {
+      Object.values(timers).forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, []);
 
   const isInProgress = data?.attempt.status === "IN_PROGRESS";
   // Un examen composé uniquement de dépôts de fichier n'a pas besoin de
@@ -356,23 +377,73 @@ function TakeEvaluation() {
     };
   }, [isInProgress, requiresIntegrityMode, reportExit]);
 
-  async function handleChangeText(questionId, textAnswer) {
-    setSavingId(questionId);
+  // Sauvegarde immédiate (sélection QCM, blur d'un champ texte). Un
+  // compteur par question ignore les réponses arrivées en désordre :
+  // si deux sauvegardes de la même question sont déclenchées coup sur
+  // coup (debounce + blur), seule la plus récente doit mettre à jour
+  // l'écran.
+  const flushTextSave = useCallback(
+    async (questionId, textAnswer) => {
+      const requestSeq = (saveRequestSeqRef.current[questionId] || 0) + 1;
+      saveRequestSeqRef.current[questionId] = requestSeq;
 
-    try {
-      const payload = await saveAnswer(attemptId, questionId, textAnswer);
+      setSavingId(questionId);
 
-      setData(payload);
-    } catch (saveError) {
-      if (!handleUnavailable(saveError)) {
-        setError(
-          saveError.response?.data?.message ||
-            "Impossible d’enregistrer la réponse."
-        );
+      try {
+        const payload = await saveAnswer(attemptId, questionId, textAnswer);
+
+        if (saveRequestSeqRef.current[questionId] === requestSeq) {
+          setData(payload);
+        }
+      } catch (saveError) {
+        if (
+          saveRequestSeqRef.current[questionId] === requestSeq &&
+          !handleUnavailable(saveError)
+        ) {
+          setError(
+            saveError.response?.data?.message ||
+              "Impossible d’enregistrer la réponse."
+          );
+        }
+      } finally {
+        if (saveRequestSeqRef.current[questionId] === requestSeq) {
+          setSavingId((current) => (current === questionId ? null : current));
+        }
       }
-    } finally {
-      setSavingId((current) => (current === questionId ? null : current));
+    },
+    [attemptId]
+  );
+
+  function handleSelectChoice(questionId, choiceId) {
+    if (saveTimersRef.current[questionId]) {
+      window.clearTimeout(saveTimersRef.current[questionId]);
+      delete saveTimersRef.current[questionId];
     }
+
+    flushTextSave(questionId, choiceId);
+  }
+
+  // Autosave pendant la frappe : debounce pour ne pas enregistrer à
+  // chaque caractère, avec sauvegarde immédiate au blur (voir
+  // handleBlurText) pour ne jamais perdre la dernière valeur tapée.
+  function handleTypeText(questionId, textAnswer) {
+    if (saveTimersRef.current[questionId]) {
+      window.clearTimeout(saveTimersRef.current[questionId]);
+    }
+
+    saveTimersRef.current[questionId] = window.setTimeout(() => {
+      delete saveTimersRef.current[questionId];
+      flushTextSave(questionId, textAnswer);
+    }, TEXT_AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  function handleBlurText(questionId, textAnswer) {
+    if (saveTimersRef.current[questionId]) {
+      window.clearTimeout(saveTimersRef.current[questionId]);
+      delete saveTimersRef.current[questionId];
+    }
+
+    flushTextSave(questionId, textAnswer);
   }
 
   async function handleChangeFile(questionId, file) {
@@ -571,7 +642,9 @@ function TakeEvaluation() {
             number={index + 1}
             question={question}
             saving={savingId === question.id}
-            onChangeText={(value) => handleChangeText(question.id, value)}
+            onSelectChoice={(value) => handleSelectChoice(question.id, value)}
+            onTypeText={(value) => handleTypeText(question.id, value)}
+            onBlurText={(value) => handleBlurText(question.id, value)}
             onChangeFile={(file) => handleChangeFile(question.id, file)}
           />
         ))}
