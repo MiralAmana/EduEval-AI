@@ -298,7 +298,7 @@ function getStudentName(attempt) {
 function csvEscape(value) {
   const stringValue = String(value ?? "");
 
-  if (/[",\n]/.test(stringValue)) {
+  if (/["\n;]/.test(stringValue)) {
     return `"${stringValue.replace(/"/g, '""')}"`;
   }
 
@@ -361,11 +361,15 @@ function downloadResultsCsv(evaluation, sortedAttempts, maximumScore, passingSco
   );
 
   const csvContent = rows
-    .map((row) => row.map(csvEscape).join(","))
+    .map((row) => row.map(csvEscape).join(";"))
     .join("\r\n");
 
-  // Le BOM UTF-8 assure un affichage correct des accents dans Excel.
-  const blob = new Blob(["﻿" + csvContent], {
+  // Excel en français attend ";" comme séparateur (la virgule sert de
+  // séparateur décimal) : sans ça, tout finit dans la colonne A. Le
+  // directive "sep=" force Excel à le reconnaître quelle que soit sa
+  // configuration régionale. Le BOM UTF-8 assure un affichage correct
+  // des accents.
+  const blob = new Blob(["﻿sep=;\r\n" + csvContent], {
     type: "text/csv;charset=utf-8;",
   });
 
