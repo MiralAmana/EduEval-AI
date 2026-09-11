@@ -19,6 +19,7 @@ import AiCreate from "@/features/pages/Evaluation/AiCreate";
 import CreateChoice from "@/features/pages/Evaluation/CreateChoice";
 import EvaluationDetails from "@/features/pages/Evaluation/EvaluationDetails";
 import AttemptReview from "@/features/pages/Evaluation/AttemptReview";
+import QuestionCorrection from "@/features/pages/Evaluation/QuestionCorrection";
 import FileDepositCreate from "@/features/pages/Evaluation/FileDepositCreate";
 import ManualCreate from "@/features/pages/Evaluation/ManualCreate";
 import PdfImport from "@/features/pages/Evaluation/PdfImport";
@@ -307,6 +308,19 @@ function AppRoutes() {
           <RequireAuth>
             <AppLayout>
               <AttemptReview />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+
+      {/* Correction question par question */}
+
+      <Route
+        path="/evaluations/:id/questions/:questionId"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <QuestionCorrection />
             </AppLayout>
           </RequireAuth>
         }

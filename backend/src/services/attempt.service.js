@@ -3,6 +3,7 @@ const path = require("node:path");
 
 const mammoth = require("mammoth");
 const XLSX = require("xlsx");
+const sanitizeHtml = require("sanitize-html");
 
 const prisma = require("../lib/prisma");
 const attemptCache = require("../lib/attemptCache");
@@ -21,6 +22,12 @@ const evaluationWithQuestionsInclude = {
 
         include: {
           choices: {
+            orderBy: {
+              position: "asc",
+            },
+          },
+
+          criteria: {
             orderBy: {
               position: "asc",
             },
@@ -187,7 +194,11 @@ async function finalizeAttempt(attempt, status, submittedAt) {
     },
 
     include: {
-      answers: true,
+      answers: {
+        include: {
+          criterionScores: true,
+        },
+      },
     },
   });
 
@@ -243,7 +254,11 @@ async function getAttemptWithContext(attemptId) {
     },
 
     include: {
-      answers: true,
+      answers: {
+        include: {
+          criterionScores: true,
+        },
+      },
       student: true,
       publication: {
         include: evaluationWithQuestionsInclude,
@@ -293,7 +308,15 @@ function buildStudentPayload(attempt) {
         ? {
             textAnswer: answer.textAnswer,
             filePath: answer.filePath,
-            ...(revealScores ? { score: answer.score } : {}),
+            ...(revealScores
+              ? {
+                  score: answer.score,
+                  criterionScores: answer.criterionScores.map((entry) => ({
+                    criterionId: entry.criterionId,
+                    pointsAwarded: entry.pointsAwarded,
+                  })),
+                }
+              : {}),
           }
         : null,
     };
@@ -369,7 +392,11 @@ async function joinPublication({ code, firstName, lastName, email }) {
     },
 
     include: {
-      answers: true,
+      answers: {
+        include: {
+          criterionScores: true,
+        },
+      },
       student: true,
       publication: {
         include: evaluationWithQuestionsInclude,
@@ -386,7 +413,11 @@ async function joinPublication({ code, firstName, lastName, email }) {
       },
 
       include: {
-        answers: true,
+        answers: {
+        include: {
+          criterionScores: true,
+        },
+      },
         student: true,
         publication: {
           include: evaluationWithQuestionsInclude,
@@ -655,7 +686,11 @@ async function requireAttemptOwnedByTeacher(attemptId, userId) {
     },
 
     include: {
-      answers: true,
+      answers: {
+        include: {
+          criterionScores: true,
+        },
+      },
       student: true,
       publication: {
         include: evaluationWithQuestionsInclude,
@@ -672,6 +707,26 @@ async function requireAttemptOwnedByTeacher(attemptId, userId) {
   return attempt;
 }
 
+/**
+ * Réduit une réponse (objet Prisma complet) à ce qu'une vue de
+ * correction enseignant a besoin d'afficher, en particulier en
+ * ramenant criterionScores à sa forme {criterionId, pointsAwarded}
+ * plutôt que d'exposer les lignes brutes de la table CriterionScore.
+ */
+function sanitizeAnswerForReview(answer) {
+  if (!answer) {
+    return null;
+  }
+
+  return {
+    ...answer,
+    criterionScores: answer.criterionScores.map((entry) => ({
+      criterionId: entry.criterionId,
+      pointsAwarded: entry.pointsAwarded,
+    })),
+  };
+}
+
 async function getAttemptForReview(attemptId, userId) {
   const attempt = await prisma.attempt.findFirst({
     where: {
@@ -685,7 +740,11 @@ async function getAttemptForReview(attemptId, userId) {
 
     include: {
       student: true,
-      answers: true,
+      answers: {
+        include: {
+          criterionScores: true,
+        },
+      },
       publication: {
         include: evaluationWithQuestionsInclude,
       },
@@ -708,7 +767,10 @@ async function getAttemptForReview(attemptId, userId) {
       points: question.points,
       correctAnswer: question.correctAnswer,
       choices: question.choices,
-      answer: answersByQuestionId.get(question.id) || null,
+      criteria: question.criteria,
+      answer: sanitizeAnswerForReview(
+        answersByQuestionId.get(question.id)
+      ),
     })
   );
 
@@ -748,21 +810,104 @@ function findQuestionOrThrow(attempt, questionId) {
   return question;
 }
 
+/**
+ * Calcule le total d'un barème détaillé à partir des points saisis
+ * par critère, en clampant chaque entrée à son maximum et en
+ * ignorant les identifiants de critère inconnus.
+ */
+function computeCriteriaTotal(criteria, criterionScores) {
+  const criteriaById = new Map(
+    criteria.map((criterion) => [criterion.id, criterion])
+  );
+
+  return (criterionScores || [])
+    .filter((entry) => criteriaById.has(entry?.criterionId))
+    .reduce((sum, entry) => {
+      const criterion = criteriaById.get(entry.criterionId);
+      const pointsAwarded = Math.min(
+        Math.max(Number(entry.pointsAwarded) || 0, 0),
+        criterion.points
+      );
+
+      return sum + pointsAwarded;
+    }, 0);
+}
+
+/**
+ * Enregistre le détail par critère d'une réponse déjà notée. Les
+ * critères non présents dans criterionScores sont supprimés (ex. un
+ * critère décoché repasse à "non noté" plutôt que de garder une
+ * ancienne valeur périmée).
+ */
+async function saveCriterionScores(answerId, criteria, criterionScores) {
+  const criteriaById = new Map(
+    criteria.map((criterion) => [criterion.id, criterion])
+  );
+
+  const validEntries = (criterionScores || [])
+    .filter((entry) => criteriaById.has(entry?.criterionId))
+    .map((entry) => {
+      const criterion = criteriaById.get(entry.criterionId);
+
+      return {
+        criterionId: entry.criterionId,
+        pointsAwarded: Math.min(
+          Math.max(Number(entry.pointsAwarded) || 0, 0),
+          criterion.points
+        ),
+      };
+    });
+
+  await prisma.criterionScore.deleteMany({
+    where: {
+      answerId,
+      criterionId: {
+        notIn: validEntries.map((entry) => entry.criterionId),
+      },
+    },
+  });
+
+  await Promise.all(
+    validEntries.map((entry) =>
+      prisma.criterionScore.upsert({
+        where: {
+          criterionId_answerId: {
+            criterionId: entry.criterionId,
+            answerId,
+          },
+        },
+
+        update: {
+          pointsAwarded: entry.pointsAwarded,
+        },
+
+        create: {
+          criterionId: entry.criterionId,
+          answerId,
+          pointsAwarded: entry.pointsAwarded,
+        },
+      })
+    )
+  );
+}
+
 async function gradeAnswerManually(
   attemptId,
   questionId,
   userId,
-  { score, feedback }
+  { score, feedback, criterionScores }
 ) {
   const attempt = await requireAttemptOwnedByTeacher(attemptId, userId);
   const question = findQuestionOrThrow(attempt, questionId);
 
-  const clampedScore = Math.min(
-    Math.max(Number(score) || 0, 0),
-    question.points
-  );
+  const useCriteria =
+    Array.isArray(criterionScores) && question.criteria.length > 0;
 
-  await prisma.answer.upsert({
+  const clampedScore = useCriteria
+    ? computeCriteriaTotal(question.criteria, criterionScores)
+    : Math.min(Math.max(Number(score) || 0, 0), question.points);
+
+  const answer = await prisma.answer.upsert({
     where: {
       questionId_attemptId: {
         questionId,
@@ -784,6 +929,10 @@ async function gradeAnswerManually(
       gradedBy: "TEACHER",
     },
   });
+
+  if (useCriteria) {
+    await saveCriterionScores(answer.id, question.criteria, criterionScores);
+  }
 
   await recomputeAttemptScore(
     attemptId,
@@ -852,13 +1001,14 @@ async function gradeAnswerWithAiAssist(attemptId, questionId, userId) {
 
   const priorGrading = buildGradingContext(attempt, questionId);
 
-  const { score, feedback } = await gradeAnswerWithAI(
+  const { score, feedback, criterionScores } = await gradeAnswerWithAI(
     question,
     existingAnswer?.textAnswer,
-    priorGrading
+    priorGrading,
+    question.criteria
   );
 
-  await prisma.answer.upsert({
+  const answer = await prisma.answer.upsert({
     where: {
       questionId_attemptId: {
         questionId,
@@ -882,12 +1032,129 @@ async function gradeAnswerWithAiAssist(attemptId, questionId, userId) {
     },
   });
 
+  if (criterionScores) {
+    await saveCriterionScores(answer.id, question.criteria, criterionScores);
+  }
+
   await recomputeAttemptScore(
     attemptId,
     attempt.publication.evaluation.questions
   );
 
   return getAttemptForReview(attemptId, userId);
+}
+
+/**
+ * Liste, pour une question donnée, la réponse de chaque copie
+ * terminée de l'évaluation — pour corriger "question par question"
+ * plutôt que copie par copie. Inclut les copies n'ayant pas répondu à
+ * cette question (answer null) : un étudiant qui l'a laissée vide
+ * doit quand même apparaître dans la liste à corriger.
+ */
+async function getQuestionAnswersForReview(evaluationId, questionId, userId) {
+  const question = await prisma.question.findFirst({
+    where: {
+      id: questionId,
+      evaluationId,
+      evaluation: {
+        userId,
+      },
+    },
+
+    include: {
+      choices: {
+        orderBy: {
+          position: "asc",
+        },
+      },
+
+      criteria: {
+        orderBy: {
+          position: "asc",
+        },
+      },
+    },
+  });
+
+  if (!question) {
+    return null;
+  }
+
+  const attempts = await prisma.attempt.findMany({
+    where: {
+      status: {
+        not: "IN_PROGRESS",
+      },
+
+      publication: {
+        evaluationId,
+      },
+    },
+
+    include: {
+      student: true,
+      answers: {
+        where: {
+          questionId,
+        },
+
+        include: {
+          criterionScores: true,
+        },
+      },
+    },
+
+    orderBy: [
+      {
+        student: {
+          lastName: "asc",
+        },
+      },
+      {
+        student: {
+          firstName: "asc",
+        },
+      },
+    ],
+  });
+
+  return {
+    question: {
+      id: question.id,
+      statement: question.statement,
+      type: question.type,
+      points: question.points,
+      correctAnswer: question.correctAnswer,
+      choices: question.choices,
+      criteria: question.criteria,
+    },
+
+    answers: attempts.map((attempt) => {
+      const answer = attempt.answers[0] || null;
+
+      return {
+        attemptId: attempt.id,
+        attemptStatus: attempt.status,
+        student: {
+          firstName: attempt.student.firstName,
+          lastName: attempt.student.lastName,
+          email: attempt.student.email,
+        },
+        textAnswer: answer?.textAnswer ?? null,
+        filePath: answer?.filePath ?? null,
+        fileName: answer?.fileName ?? null,
+        score: answer?.score ?? null,
+        feedback: answer?.feedback ?? null,
+        gradedBy: answer?.gradedBy ?? null,
+        criterionScores: answer
+          ? answer.criterionScores.map((entry) => ({
+              criterionId: entry.criterionId,
+              pointsAwarded: entry.pointsAwarded,
+            }))
+          : [],
+      };
+    }),
+  };
 }
 
 async function publishResults(attemptId, userId) {
@@ -942,6 +1209,49 @@ async function getAnswerFileForTeacher(attemptId, questionId, userId) {
   };
 }
 
+/**
+ * Liste blanche stricte pour l'aperçu HTML des fichiers déposés par les
+ * étudiants (mammoth pour .docx, XLSX.utils.sheet_to_html pour .xlsx) :
+ * ce HTML est affiché en `dangerouslySetInnerHTML` côté enseignant, il
+ * doit donc être neutralisé avant de quitter le backend (schémas
+ * dangereux type `javascript:` dans un lien, balises actives, etc.).
+ *
+ * `sanitize-html` est volontairement figé à 2.17.1 (dépendance
+ * htmlparser2 ^8, CommonJS) : à partir de 2.17.2, htmlparser2 devient
+ * ESM-only et casse le require() sous Jest. Les CVE corrigées par les
+ * versions plus récentes (jusqu'à 2.17.7) portent toutes sur des
+ * balises/attributs qu'on n'autorise pas ici (svg, textarea, action,
+ * formaction, data, poster, background) : la liste blanche ci-dessous
+ * n'y est donc pas exposée. Revoir ce pin si htmlparser2 republie un
+ * build CJS, ou si le projet migre vers ESM/une config Jest avec
+ * transformIgnorePatterns.
+ */
+const FILE_PREVIEW_SANITIZE_OPTIONS = {
+  allowedTags: [
+    "p", "br", "strong", "b", "em", "i", "u", "s", "sub", "sup",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li",
+    "table", "thead", "tbody", "tr", "td", "th", "colgroup", "col",
+    "span", "div", "blockquote", "code", "pre", "a", "img",
+  ],
+  allowedAttributes: {
+    a: ["href"],
+    img: ["src", "alt", "width", "height"],
+    td: ["colspan", "rowspan"],
+    th: ["colspan", "rowspan"],
+    col: ["span"],
+  },
+  allowedSchemes: ["http", "https", "mailto"],
+  allowedSchemesByTag: {
+    img: ["data", "http", "https"],
+  },
+  disallowedTagsMode: "discard",
+};
+
+function sanitizeFilePreviewHtml(html) {
+  return sanitizeHtml(html, FILE_PREVIEW_SANITIZE_OPTIONS);
+}
+
 async function getAnswerFilePreview(attemptId, questionId, userId) {
   const attempt = await requireAttemptOwnedByTeacher(attemptId, userId);
   const answer = attempt.answers.find(
@@ -962,7 +1272,7 @@ async function getAnswerFilePreview(attemptId, questionId, userId) {
     const buffer = await storageService.downloadFileBuffer(answer.filePath);
     const result = await mammoth.convertToHtml({ buffer });
 
-    return { previewType: "html", html: result.value };
+    return { previewType: "html", html: sanitizeFilePreviewHtml(result.value) };
   }
 
   if (extension === ".xls" || extension === ".xlsx") {
@@ -972,7 +1282,7 @@ async function getAnswerFilePreview(attemptId, questionId, userId) {
     const sheet = workbook.Sheets[firstSheetName];
     const html = XLSX.utils.sheet_to_html(sheet);
 
-    return { previewType: "html", html };
+    return { previewType: "html", html: sanitizeFilePreviewHtml(html) };
   }
 
   return { previewType: "unsupported" };
@@ -989,6 +1299,7 @@ module.exports = {
   getAttemptForReview,
   gradeAnswerManually,
   gradeAnswerWithAiAssist,
+  getQuestionAnswersForReview,
   publishResults,
   getAnswerFileForTeacher,
   getAnswerFilePreview,

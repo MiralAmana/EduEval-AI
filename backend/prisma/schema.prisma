@@ -82,7 +82,6 @@ model Evaluation {
   user   User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   questions    Question[]
-  criteria     Criterion[]
   publications Publication[]
 
   createdAt DateTime @default(now())
@@ -124,8 +123,9 @@ model Question {
   evaluationId String
   evaluation   Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
 
-  choices Choice[]
-  answers Answer[]
+  choices  Choice[]
+  answers  Answer[]
+  criteria Criterion[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -145,16 +145,43 @@ model Choice {
   @@index([questionId])
 }
 
+// Barème détaillé optionnel d'une question à réponse ouverte : une
+// liste de critères (ex. "Clarté" : 2 pts, "Exactitude" : 3 pts) que
+// l'enseignant ou l'IA notent individuellement plutôt que d'attribuer
+// une note globale à l'aveugle.
 model Criterion {
-  id     String @id @default(cuid())
-  type   String
-  value  String
-  points Float
+  id       String @id @default(cuid())
+  label    String
+  points   Float
+  position Int    @default(0)
 
-  evaluationId String
-  evaluation   Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
-  @@index([evaluationId])
+  scores CriterionScore[]
+
+  @@index([questionId])
+}
+
+// Le détail, pour une réponse donnée, des points obtenus à chaque
+// critère du barème. Answer.score reste la somme faisant foi (utilisée
+// partout ailleurs : classement, export, publication) — ceci n'est
+// que le détail qui justifie cette somme.
+model CriterionScore {
+  id            String @id @default(cuid())
+  pointsAwarded Float
+
+  criterionId String
+  criterion   Criterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+
+  answerId String
+  answer   Answer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([criterionId, answerId])
+  @@index([answerId])
 }
 
 model Student {
@@ -211,6 +238,8 @@ model Answer {
 
   question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
   attempt  Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  criterionScores CriterionScore[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

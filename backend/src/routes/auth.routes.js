@@ -8,7 +8,9 @@ const router = express.Router();
 
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  limit: 5,
+  // Configurable pour les tests d'intégration, qui créent plusieurs
+  // comptes de test depuis la même IP dans une seule exécution.
+  limit: Number(process.env.AUTH_REGISTER_RATE_LIMIT) || 5,
   standardHeaders: true,
   legacyHeaders: false,
   message: {

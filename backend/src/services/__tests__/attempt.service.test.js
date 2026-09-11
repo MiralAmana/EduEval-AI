@@ -2,6 +2,7 @@ jest.mock("../../lib/prisma", () => ({
   attempt: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
+    findMany: jest.fn(),
     update: jest.fn(),
     create: jest.fn(),
   },
@@ -9,6 +10,13 @@ jest.mock("../../lib/prisma", () => ({
     upsert: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+  },
+  question: {
+    findFirst: jest.fn(),
+  },
+  criterionScore: {
+    upsert: jest.fn(),
+    deleteMany: jest.fn(),
   },
   student: {
     upsert: jest.fn(),
@@ -23,6 +31,10 @@ jest.mock("../../lib/prisma", () => ({
 
 jest.mock("../email.service", () => ({
   sendResultsPublishedEmail: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock("../grading.service", () => ({
+  gradeAnswerWithAI: jest.fn(),
 }));
 
 jest.mock("../storage.service", () => ({
@@ -48,6 +60,7 @@ const attemptCache = require("../../lib/attemptCache");
 const storageService = require("../storage.service");
 const mammoth = require("mammoth");
 const XLSX = require("xlsx");
+const { gradeAnswerWithAI } = require("../grading.service");
 const {
   gradeAnswer,
   isPureQcm,
@@ -60,6 +73,9 @@ const {
   getAttempt,
   getAnswerFileForTeacher,
   getAnswerFilePreview,
+  getQuestionAnswersForReview,
+  gradeAnswerManually,
+  gradeAnswerWithAiAssist,
 } = require("../attempt.service");
 
 function buildQcmQuestion(overrides = {}) {
@@ -97,6 +113,51 @@ function buildLongTextQuestion(overrides = {}) {
     statement: "Explique la photosynthèse.",
     correctAnswer: null,
     choices: [],
+    criteria: [],
+    ...overrides,
+  };
+}
+
+function buildLongTextQuestionWithCriteria(overrides = {}) {
+  return buildLongTextQuestion({
+    criteria: [
+      { id: "crit-clarte", label: "Clarté", points: 2 },
+      { id: "crit-exactitude", label: "Exactitude", points: 3 },
+    ],
+    ...overrides,
+  });
+}
+
+function buildTeacherAttemptFixture(question, overrides = {}) {
+  return {
+    id: "attempt-1",
+    status: "SUBMITTED",
+    exitCount: 0,
+    startedAt: new Date(Date.now() - 60 * 60 * 1000),
+    endsAt: new Date(Date.now() + 60 * 60 * 1000),
+    submittedAt: new Date(),
+    score: 0,
+    resultsPublished: false,
+    answers: [],
+    student: {
+      id: "student-1",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "ada@example.com",
+    },
+    publication: {
+      id: "pub-1",
+      status: "ACTIVE",
+      duration: 60,
+      availableAt: null,
+      closesAt: null,
+      evaluation: {
+        title: "Évaluation test",
+        type: "MIXED",
+        instructions: "",
+        questions: [question],
+      },
+    },
     ...overrides,
   };
 }
@@ -731,6 +792,71 @@ describe("getAnswerFilePreview", () => {
     expect(result).toEqual({ previewType: "html", html: "<table></table>" });
   });
 
+  it("neutralise le HTML dangereux renvoyé par mammoth avant de le renvoyer au client", async () => {
+    const attempt = buildAttemptFixture({
+      answers: [
+        {
+          questionId: "q-short",
+          filePath: "answers/x/devoir.docx",
+          fileName: "devoir.docx",
+        },
+      ],
+    });
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+    storageService.downloadFileBuffer.mockResolvedValue(
+      Buffer.from("docx-bytes")
+    );
+    mammoth.convertToHtml.mockResolvedValue({
+      value: '<p onclick="alert(1)">Contenu</p><script>alert(1)</script>',
+    });
+
+    const result = await getAnswerFilePreview(
+      "attempt-1",
+      "q-short",
+      "teacher-1"
+    );
+
+    expect(result.html).not.toContain("<script");
+    expect(result.html).not.toContain("onclick");
+    expect(result.html).toContain("Contenu");
+  });
+
+  it("neutralise un lien javascript: dans l'aperçu .xlsx avant de le renvoyer au client", async () => {
+    const attempt = buildAttemptFixture({
+      answers: [
+        {
+          questionId: "q-short",
+          filePath: "answers/x/notes.xlsx",
+          fileName: "notes.xlsx",
+        },
+      ],
+    });
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+    storageService.downloadFileBuffer.mockResolvedValue(
+      Buffer.from("xlsx-bytes")
+    );
+
+    const sheet = {};
+    XLSX.read.mockReturnValue({
+      SheetNames: ["Feuil1"],
+      Sheets: { Feuil1: sheet },
+    });
+    XLSX.utils.sheet_to_html.mockReturnValue(
+      '<table><tr><td><a href="javascript:alert(document.cookie)">clic</a></td></tr></table>'
+    );
+
+    const result = await getAnswerFilePreview(
+      "attempt-1",
+      "q-short",
+      "teacher-1"
+    );
+
+    expect(result.html).not.toContain("javascript:");
+    expect(result.html).toContain("clic");
+  });
+
   it("renvoie unsupported pour un type de fichier non pris en charge, sans téléchargement", async () => {
     const attempt = buildAttemptFixture({
       answers: [
@@ -752,5 +878,250 @@ describe("getAnswerFilePreview", () => {
 
     expect(result).toEqual({ previewType: "unsupported" });
     expect(storageService.downloadFileBuffer).not.toHaveBeenCalled();
+  });
+});
+
+describe("getQuestionAnswersForReview", () => {
+  it("renvoie null si la question n'appartient pas à une évaluation de l'enseignant", async () => {
+    prisma.question.findFirst.mockResolvedValue(null);
+
+    const result = await getQuestionAnswersForReview(
+      "eval-1",
+      "q-short",
+      "teacher-1"
+    );
+
+    expect(result).toBeNull();
+    expect(prisma.attempt.findMany).not.toHaveBeenCalled();
+  });
+
+  it("ne récupère que les tentatives terminées de cette évaluation", async () => {
+    prisma.question.findFirst.mockResolvedValue({
+      id: "q-short",
+      statement: "Capitale de la France ?",
+      type: "SHORT_TEXT",
+      points: 3,
+      correctAnswer: "Paris",
+      choices: [],
+    });
+    prisma.attempt.findMany.mockResolvedValue([]);
+
+    await getQuestionAnswersForReview("eval-1", "q-short", "teacher-1");
+
+    const callArgs = prisma.attempt.findMany.mock.calls[0][0];
+
+    expect(callArgs.where.status).toEqual({ not: "IN_PROGRESS" });
+    expect(callArgs.where.publication).toEqual({ evaluationId: "eval-1" });
+  });
+
+  it("inclut les copies n'ayant pas répondu à la question, avec une réponse nulle", async () => {
+    prisma.question.findFirst.mockResolvedValue({
+      id: "q-short",
+      statement: "Capitale de la France ?",
+      type: "SHORT_TEXT",
+      points: 3,
+      correctAnswer: "Paris",
+      choices: [],
+    });
+
+    prisma.attempt.findMany.mockResolvedValue([
+      {
+        id: "attempt-blank",
+        status: "SUBMITTED",
+        student: {
+          firstName: "Ana",
+          lastName: "Blanc",
+          email: "ana@example.com",
+        },
+        answers: [],
+      },
+      {
+        id: "attempt-graded",
+        status: "SUBMITTED",
+        student: {
+          firstName: "Bo",
+          lastName: "Curie",
+          email: "bo@example.com",
+        },
+        answers: [
+          {
+            textAnswer: "Paris",
+            score: 3,
+            feedback: "Bien",
+            gradedBy: "TEACHER",
+            filePath: null,
+            fileName: null,
+            criterionScores: [],
+          },
+        ],
+      },
+    ]);
+
+    const result = await getQuestionAnswersForReview(
+      "eval-1",
+      "q-short",
+      "teacher-1"
+    );
+
+    expect(result.question.id).toBe("q-short");
+    expect(result.answers).toHaveLength(2);
+
+    const blank = result.answers.find(
+      (answer) => answer.attemptId === "attempt-blank"
+    );
+    expect(blank.textAnswer).toBeNull();
+    expect(blank.score).toBeNull();
+
+    const graded = result.answers.find(
+      (answer) => answer.attemptId === "attempt-graded"
+    );
+    expect(graded.score).toBe(3);
+    expect(graded.student.firstName).toBe("Bo");
+  });
+});
+
+describe("gradeAnswerManually", () => {
+  it("note avec un score global quand la question n'a pas de barème détaillé", async () => {
+    const question = buildShortTextQuestion({ criteria: [] });
+    const attempt = buildTeacherAttemptFixture(question);
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+    prisma.answer.upsert.mockResolvedValue({
+      id: "ans-1",
+      questionId: question.id,
+      attemptId: "attempt-1",
+    });
+    prisma.answer.findMany.mockResolvedValue([]);
+
+    await gradeAnswerManually("attempt-1", question.id, "teacher-1", {
+      score: 2,
+      feedback: "Bien",
+    });
+
+    expect(prisma.answer.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          score: 2,
+          feedback: "Bien",
+          gradedBy: "TEACHER",
+        }),
+      })
+    );
+    expect(prisma.criterionScore.upsert).not.toHaveBeenCalled();
+  });
+
+  it("calcule le score total à partir des critères et enregistre le détail", async () => {
+    const question = buildLongTextQuestionWithCriteria();
+    const attempt = buildTeacherAttemptFixture(question);
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+    prisma.answer.upsert.mockResolvedValue({
+      id: "ans-1",
+      questionId: question.id,
+      attemptId: "attempt-1",
+    });
+    prisma.answer.findMany.mockResolvedValue([]);
+
+    await gradeAnswerManually("attempt-1", question.id, "teacher-1", {
+      criterionScores: [
+        { criterionId: "crit-clarte", pointsAwarded: 2 },
+        { criterionId: "crit-exactitude", pointsAwarded: 2 },
+      ],
+    });
+
+    expect(prisma.answer.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ score: 4 }),
+      })
+    );
+    expect(prisma.criterionScore.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.criterionScore.deleteMany).toHaveBeenCalledWith({
+      where: {
+        answerId: "ans-1",
+        criterionId: { notIn: ["crit-clarte", "crit-exactitude"] },
+      },
+    });
+  });
+
+  it("plafonne chaque critère à son maximum et ignore les identifiants inconnus", async () => {
+    const question = buildLongTextQuestionWithCriteria();
+    const attempt = buildTeacherAttemptFixture(question);
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+    prisma.answer.upsert.mockResolvedValue({
+      id: "ans-1",
+      questionId: question.id,
+      attemptId: "attempt-1",
+    });
+    prisma.answer.findMany.mockResolvedValue([]);
+
+    await gradeAnswerManually("attempt-1", question.id, "teacher-1", {
+      criterionScores: [
+        { criterionId: "crit-clarte", pointsAwarded: 99 },
+        { criterionId: "crit-inconnu", pointsAwarded: 10 },
+      ],
+    });
+
+    expect(prisma.answer.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ score: 2 }),
+      })
+    );
+    expect(prisma.criterionScore.upsert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("gradeAnswerWithAiAssist", () => {
+  it("transmet le barème de la question à l'IA et enregistre le détail par critère", async () => {
+    const question = buildLongTextQuestionWithCriteria();
+    const attempt = buildTeacherAttemptFixture(question);
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+    gradeAnswerWithAI.mockResolvedValue({
+      score: 4,
+      feedback: "Bien.",
+      criterionScores: [
+        { criterionId: "crit-clarte", pointsAwarded: 2 },
+        { criterionId: "crit-exactitude", pointsAwarded: 2 },
+      ],
+    });
+    prisma.answer.upsert.mockResolvedValue({
+      id: "ans-1",
+      questionId: question.id,
+      attemptId: "attempt-1",
+    });
+    prisma.answer.findMany.mockResolvedValue([]);
+
+    await gradeAnswerWithAiAssist("attempt-1", question.id, "teacher-1");
+
+    expect(gradeAnswerWithAI).toHaveBeenCalledWith(
+      question,
+      undefined,
+      [],
+      question.criteria
+    );
+    expect(prisma.criterionScore.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it("n'enregistre aucun détail par critère quand la question n'a pas de barème", async () => {
+    const question = buildShortTextQuestion({ criteria: [] });
+    const attempt = buildTeacherAttemptFixture(question);
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+    gradeAnswerWithAI.mockResolvedValue({
+      score: 3,
+      feedback: "Bien.",
+      criterionScores: null,
+    });
+    prisma.answer.upsert.mockResolvedValue({
+      id: "ans-1",
+      questionId: question.id,
+      attemptId: "attempt-1",
+    });
+    prisma.answer.findMany.mockResolvedValue([]);
+
+    await gradeAnswerWithAiAssist("attempt-1", question.id, "teacher-1");
+
+    expect(prisma.criterionScore.upsert).not.toHaveBeenCalled();
   });
 });

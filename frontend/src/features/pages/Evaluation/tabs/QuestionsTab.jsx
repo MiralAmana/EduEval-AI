@@ -1,6 +1,8 @@
+import { Link } from "react-router-dom";
 import {
   CheckCircle2,
   Circle,
+  ClipboardCheck,
   FileQuestion,
   GripVertical,
   ListChecks,
@@ -15,6 +17,7 @@ import {
 } from "@/components/ui/card";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 /**
  * Retourne le libellé lisible d'un type de question.
@@ -263,6 +266,7 @@ function CriterionItem({ criterion, index }) {
 function QuestionCard({
   question,
   index,
+  evaluationId,
 }) {
   const choices = getQuestionChoices(question);
   const criteria =
@@ -306,6 +310,18 @@ function QuestionCard({
               {getQuestionText(question)}
             </CardTitle>
           </div>
+
+          {evaluationId && question?.id && (
+            <Link
+              to={`/evaluations/${evaluationId}/questions/${question.id}`}
+              className="shrink-0"
+            >
+              <Button type="button" size="sm" variant="outline">
+                <ClipboardCheck className="h-4 w-4" />
+                Corriger cette question
+              </Button>
+            </Link>
+          )}
         </div>
       </CardHeader>
 
@@ -475,6 +491,7 @@ export default function QuestionsTab({
               }
               question={question}
               index={index}
+              evaluationId={evaluation?.id}
             />
           )
         )}

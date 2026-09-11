@@ -11,8 +11,24 @@ function normalizeChoices(question) {
     .filter(Boolean);
 }
 
+function normalizeCriteria(question) {
+  if (!Array.isArray(question.criteria)) {
+    return [];
+  }
+
+  return question.criteria
+    .map((criterion) => ({
+      label: String(criterion?.label || "").trim(),
+      points: Number(criterion?.points),
+    }))
+    .filter(
+      (criterion) => criterion.label && criterion.points > 0
+    );
+}
+
 function prepareQuestion(question, position) {
   const choices = normalizeChoices(question);
+  const criteria = normalizeCriteria(question);
 
   const correctAnswer = question.correctAnswer
     ? String(question.correctAnswer).trim()
@@ -35,6 +51,14 @@ function prepareQuestion(question, position) {
           choice.toLowerCase() === correctAnswer.toLowerCase(),
       })),
     },
+
+    criteria: {
+      create: criteria.map((criterion, criterionPosition) => ({
+        label: criterion.label,
+        points: criterion.points,
+        position: criterionPosition,
+      })),
+    },
   };
 }
 
@@ -54,6 +78,12 @@ const evaluationInclude = {
 
     include: {
       choices: {
+        orderBy: {
+          position: "asc",
+        },
+      },
+
+      criteria: {
         orderBy: {
           position: "asc",
         },
@@ -388,6 +418,12 @@ async function duplicateEvaluation(id, userId) {
                 position: "asc",
               },
             },
+
+            criteria: {
+              orderBy: {
+                position: "asc",
+              },
+            },
           },
         },
       },
@@ -421,6 +457,14 @@ async function duplicateEvaluation(id, userId) {
               text: choice.text,
               correct: choice.correct,
               position: choice.position,
+            })),
+          },
+
+          criteria: {
+            create: question.criteria.map((criterion) => ({
+              label: criterion.label,
+              points: criterion.points,
+              position: criterion.position,
             })),
           },
         })),

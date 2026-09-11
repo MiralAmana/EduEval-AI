@@ -77,3 +77,11 @@ export async function updateEvaluationStatus(
 
   return response.data;
 }
+
+export async function getQuestionAnswers(evaluationId, questionId) {
+  const response = await api.get(
+    `/api/evaluations/${evaluationId}/questions/${questionId}/answers`
+  );
+
+  return response.data;
+}

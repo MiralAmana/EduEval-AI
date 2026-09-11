@@ -37,6 +37,7 @@ function createEmptyQuestion() {
     choices: [],
     correctAnswer: "",
     points: 1,
+    criteria: [],
   };
 }
 
@@ -52,6 +53,12 @@ function normalizeQuestion(question) {
       : [],
     correctAnswer: question.correctAnswer || "",
     points: Number(question.points) || 1,
+    criteria: Array.isArray(question.criteria)
+      ? question.criteria.map((criterion) => ({
+          label: criterion.label || "",
+          points: Number(criterion.points) || 1,
+        }))
+      : [],
   };
 }
 
@@ -229,6 +236,52 @@ export default function EvaluationEdit() {
     );
   }
 
+  function addCriterion(questionId) {
+    setQuestions((current) =>
+      current.map((question) =>
+        question.id === questionId
+          ? {
+              ...question,
+              criteria: [...question.criteria, { label: "", points: 1 }],
+            }
+          : question
+      )
+    );
+  }
+
+  function updateCriterion(questionId, criterionIndex, field, value) {
+    setQuestions((current) =>
+      current.map((question) => {
+        if (question.id !== questionId) {
+          return question;
+        }
+
+        const criteria = question.criteria.map((criterion, index) =>
+          index === criterionIndex
+            ? { ...criterion, [field]: value }
+            : criterion
+        );
+
+        return { ...question, criteria };
+      })
+    );
+  }
+
+  function removeCriterion(questionId, criterionIndex) {
+    setQuestions((current) =>
+      current.map((question) =>
+        question.id === questionId
+          ? {
+              ...question,
+              criteria: question.criteria.filter(
+                (_, index) => index !== criterionIndex
+              ),
+            }
+          : question
+      )
+    );
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
 
@@ -315,6 +368,12 @@ export default function EvaluationEdit() {
             null,
           points:
             Number(question.points) || 1,
+          criteria: question.criteria
+            .filter((criterion) => criterion.label.trim())
+            .map((criterion) => ({
+              label: criterion.label.trim(),
+              points: Number(criterion.points) || 0,
+            })),
         })
       ),
     };
@@ -753,6 +812,83 @@ export default function EvaluationEdit() {
                     />
                   </div>
                 </div>
+
+                {question.type !== "QCM" && (
+                  <div className="space-y-3 rounded-lg border border-dashed p-4">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium">
+                        Barème détaillé (optionnel)
+                      </label>
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => addCriterion(question.id)}
+                      >
+                        <Plus className="size-4" />
+                        Ajouter un critère
+                      </Button>
+                    </div>
+
+                    {question.criteria.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Sans critère, la question est notée sur un score
+                        global. Ajoute des critères (ex. « Clarté », «
+                        Exactitude ») pour une correction plus
+                        transparente.
+                      </p>
+                    ) : (
+                      question.criteria.map((criterion, criterionIndex) => (
+                        <div
+                          key={criterionIndex}
+                          className="flex items-center gap-2"
+                        >
+                          <Input
+                            value={criterion.label}
+                            onChange={(event) =>
+                              updateCriterion(
+                                question.id,
+                                criterionIndex,
+                                "label",
+                                event.target.value
+                              )
+                            }
+                            placeholder={`Critère ${criterionIndex + 1}`}
+                            className="flex-1"
+                          />
+
+                          <Input
+                            type="number"
+                            min="0"
+                            value={criterion.points}
+                            onChange={(event) =>
+                              updateCriterion(
+                                question.id,
+                                criterionIndex,
+                                "points",
+                                event.target.value
+                              )
+                            }
+                            placeholder="Pts"
+                            className="w-20"
+                          />
+
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            onClick={() =>
+                              removeCriterion(question.id, criterionIndex)
+                            }
+                          >
+                            <X className="size-4" />
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             )
           )}

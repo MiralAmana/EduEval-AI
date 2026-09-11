@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import CriteriaScoreInput from "./CriteriaScoreInput";
 import {
   downloadAnswerFile,
   getAnswerFilePreview,
@@ -37,6 +38,16 @@ import {
 
 function isQuestionGraded(question) {
   return typeof question.answer?.score === "number";
+}
+
+function buildCriterionValues(answer) {
+  const values = {};
+
+  for (const entry of answer?.criterionScores || []) {
+    values[entry.criterionId] = entry.pointsAwarded;
+  }
+
+  return values;
 }
 
 function formatDate(value) {
@@ -65,6 +76,9 @@ function QuestionReview({
 }) {
   const [score, setScore] = useState(question.answer?.score ?? "");
   const [feedback, setFeedback] = useState(question.answer?.feedback || "");
+  const [criterionValues, setCriterionValues] = useState(() =>
+    buildCriterionValues(question.answer)
+  );
   const [downloading, setDownloading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewData, setPreviewData] = useState(null);
@@ -73,7 +87,11 @@ function QuestionReview({
   useEffect(() => {
     setScore(question.answer?.score ?? "");
     setFeedback(question.answer?.feedback || "");
-  }, [question.answer?.score, question.answer?.feedback]);
+    setCriterionValues(buildCriterionValues(question.answer));
+  }, [question.answer]);
+
+  const hasCriteria =
+    Array.isArray(question.criteria) && question.criteria.length > 0;
 
   const isTextQuestion =
     question.type === "SHORT_TEXT" || question.type === "LONG_TEXT";
@@ -244,33 +262,60 @@ function QuestionReview({
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-[120px_1fr] sm:items-start">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              Note / {question.points}
-            </label>
-
-            <Input
-              type="number"
-              min="0"
-              max={question.points}
-              value={score}
-              onChange={(event) => setScore(event.target.value)}
+        {hasCriteria ? (
+          <div className="grid gap-3 sm:grid-cols-2 sm:items-start">
+            <CriteriaScoreInput
+              criteria={question.criteria}
+              values={criterionValues}
+              onChange={(criterionId, value) =>
+                setCriterionValues((current) => ({
+                  ...current,
+                  [criterionId]: value,
+                }))
+              }
             />
-          </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              Commentaire (optionnel)
-            </label>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Commentaire (optionnel)
+              </label>
 
-            <Textarea
-              rows={2}
-              value={feedback}
-              onChange={(event) => setFeedback(event.target.value)}
-            />
+              <Textarea
+                rows={2}
+                value={feedback}
+                onChange={(event) => setFeedback(event.target.value)}
+              />
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-[120px_1fr] sm:items-start">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Note / {question.points}
+              </label>
+
+              <Input
+                type="number"
+                min="0"
+                max={question.points}
+                value={score}
+                onChange={(event) => setScore(event.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Commentaire (optionnel)
+              </label>
+
+              <Textarea
+                rows={2}
+                value={feedback}
+                onChange={(event) => setFeedback(event.target.value)}
+              />
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-wrap justify-end gap-2">
           {isTextQuestion && (
@@ -291,7 +336,20 @@ function QuestionReview({
             size="sm"
             disabled={savingManual || savingAi}
             onClick={() =>
-              onManualGrade(question.id, { score, feedback })
+              onManualGrade(
+                question.id,
+                hasCriteria
+                  ? {
+                      feedback,
+                      criterionScores: question.criteria.map(
+                        (criterion) => ({
+                          criterionId: criterion.id,
+                          pointsAwarded: Number(criterionValues[criterion.id]) || 0,
+                        })
+                      ),
+                    }
+                  : { score, feedback }
+              )
             }
           >
             {savingManual ? "Enregistrement..." : "Enregistrer la note"}
@@ -334,7 +392,10 @@ export default function AttemptReview() {
     loadReview();
   }, [attemptId]);
 
-  async function handleManualGrade(questionId, { score, feedback }) {
+  async function handleManualGrade(
+    questionId,
+    { score, feedback, criterionScores }
+  ) {
     setSavingKey(`manual-${questionId}`);
     setError("");
 
@@ -342,6 +403,7 @@ export default function AttemptReview() {
       const payload = await gradeAnswer(attemptId, questionId, {
         score,
         feedback,
+        criterionScores,
       });
 
       setData(payload);

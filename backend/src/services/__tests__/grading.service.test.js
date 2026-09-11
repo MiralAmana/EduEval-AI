@@ -25,7 +25,11 @@ describe("gradeAnswerWithAI", () => {
 
     const result = await gradeAnswerWithAI(question, "Une réponse.");
 
-    expect(result).toEqual({ score: 4, feedback: "Bonne réponse." });
+    expect(result).toEqual({
+      score: 4,
+      feedback: "Bonne réponse.",
+      criterionScores: null,
+    });
   });
 
   it("plafonne un score renvoyé au-dessus du barème", async () => {
@@ -74,5 +78,100 @@ describe("gradeAnswerWithAI", () => {
 
     expect(prompt).toContain("Qu'est-ce que la mitose ?");
     expect(prompt).toContain("3 / 4");
+  });
+});
+
+describe("gradeAnswerWithAI avec un barème détaillé", () => {
+  const question = {
+    statement: "Explique la photosynthèse.",
+    correctAnswer: null,
+    points: 5,
+  };
+
+  const criteria = [
+    { id: "crit-clarte", label: "Clarté", points: 2 },
+    { id: "crit-exactitude", label: "Exactitude", points: 3 },
+  ];
+
+  it("additionne les points de chaque critère pour former le score total", async () => {
+    mockAiJsonResponse({
+      criteriaScores: [
+        { criterionId: "crit-clarte", points: 2 },
+        { criterionId: "crit-exactitude", points: 1 },
+      ],
+      feedback: "Clair mais imprécis.",
+    });
+
+    const result = await gradeAnswerWithAI(
+      question,
+      "Une réponse.",
+      [],
+      criteria
+    );
+
+    expect(result.score).toBe(3);
+    expect(result.criterionScores).toEqual([
+      { criterionId: "crit-clarte", pointsAwarded: 2 },
+      { criterionId: "crit-exactitude", pointsAwarded: 1 },
+    ]);
+  });
+
+  it("plafonne chaque critère à son propre maximum", async () => {
+    mockAiJsonResponse({
+      criteriaScores: [
+        { criterionId: "crit-clarte", points: 99 },
+        { criterionId: "crit-exactitude", points: -5 },
+      ],
+      feedback: "Feedback.",
+    });
+
+    const result = await gradeAnswerWithAI(
+      question,
+      "Une réponse.",
+      [],
+      criteria
+    );
+
+    expect(result.criterionScores).toEqual([
+      { criterionId: "crit-clarte", pointsAwarded: 2 },
+      { criterionId: "crit-exactitude", pointsAwarded: 0 },
+    ]);
+  });
+
+  it("ignore un criterionId renvoyé par l'IA qui ne fait pas partie du barème", async () => {
+    mockAiJsonResponse({
+      criteriaScores: [
+        { criterionId: "crit-clarte", points: 2 },
+        { criterionId: "crit-invente", points: 10 },
+      ],
+      feedback: "Feedback.",
+    });
+
+    const result = await gradeAnswerWithAI(
+      question,
+      "Une réponse.",
+      [],
+      criteria
+    );
+
+    expect(result.criterionScores).toEqual([
+      { criterionId: "crit-clarte", pointsAwarded: 2 },
+    ]);
+    expect(result.score).toBe(2);
+  });
+
+  it("liste les critères avec leur id dans le prompt", async () => {
+    mockAiJsonResponse({
+      criteriaScores: [],
+      feedback: "Feedback.",
+    });
+
+    await gradeAnswerWithAI(question, "Une réponse.", [], criteria);
+
+    const [prompt] = askAI.mock.calls[0];
+
+    expect(prompt).toContain("crit-clarte");
+    expect(prompt).toContain("Clarté");
+    expect(prompt).toContain("crit-exactitude");
   });
 });

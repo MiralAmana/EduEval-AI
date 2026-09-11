@@ -140,6 +140,72 @@ describe("createEvaluation", () => {
       { text: "paris", position: 1, correct: true },
     ]);
   });
+
+  it("crée le barème détaillé d'une question", async () => {
+    mockTransactionClient.evaluation.create.mockResolvedValue({ id: "eval-1" });
+    mockTransactionClient.evaluation.findUnique.mockResolvedValue({});
+
+    await evaluationService.createEvaluation(
+      {
+        title: "T",
+        duration: 10,
+        status: "DRAFT",
+        questions: [
+          {
+            statement: "Explique la photosynthèse",
+            type: "LONG_TEXT",
+            points: 5,
+            criteria: [
+              { label: "Clarté", points: 2 },
+              { label: "Exactitude", points: 3 },
+            ],
+          },
+        ],
+      },
+      "user-1"
+    );
+
+    const createArgs = mockTransactionClient.evaluation.create.mock.calls[0][0];
+    const criteria = createArgs.data.questions.create[0].criteria.create;
+
+    expect(criteria).toEqual([
+      { label: "Clarté", points: 2, position: 0 },
+      { label: "Exactitude", points: 3, position: 1 },
+    ]);
+  });
+
+  it("ignore les critères sans intitulé ou sans points positifs", async () => {
+    mockTransactionClient.evaluation.create.mockResolvedValue({ id: "eval-1" });
+    mockTransactionClient.evaluation.findUnique.mockResolvedValue({});
+
+    await evaluationService.createEvaluation(
+      {
+        title: "T",
+        duration: 10,
+        status: "DRAFT",
+        questions: [
+          {
+            statement: "Q1",
+            type: "LONG_TEXT",
+            points: 5,
+            criteria: [
+              { label: "", points: 2 },
+              { label: "Valide", points: 0 },
+              { label: "Aussi valide", points: 3 },
+            ],
+          },
+        ],
+      },
+      "user-1"
+    );
+
+    const createArgs = mockTransactionClient.evaluation.create.mock.calls[0][0];
+    const criteria = createArgs.data.questions.create[0].criteria.create;
+
+    expect(criteria).toEqual([
+      { label: "Aussi valide", points: 3, position: 0 },
+    ]);
+  });
 });
 
 describe("getEvaluations / getEvaluationById", () => {
@@ -416,6 +482,7 @@ describe("duplicateEvaluation", () => {
           correctAnswer: "4",
           position: 0,
           choices: [{ text: "4", correct: true, position: 0 }],
+          criteria: [{ label: "Exactitude", points: 2, position: 0 }],
         },
       ],
     });
@@ -432,6 +499,9 @@ describe("duplicateEvaluation", () => {
     expect(createArgs.data.status).toBe("DRAFT");
     expect(createArgs.data.userId).toBe("user-1");
     expect(createArgs.data.questions.create[0].statement).toBe("Q1");
+    expect(createArgs.data.questions.create[0].criteria.create).toEqual([
+      { label: "Exactitude", points: 2, position: 0 },
+    ]);
     expect(result).toEqual({ id: "eval-2" });
   });
 });

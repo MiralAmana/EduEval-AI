@@ -21,6 +21,7 @@ function createEmptyQuestion() {
     correctAnswer: "",
     points: 1,
     choices: ["", "", "", ""],
+    criteria: [],
   };
 }
 
@@ -91,6 +92,52 @@ export default function ManualCreate() {
     );
   }
 
+  function addCriterion(questionId) {
+    setQuestions((current) =>
+      current.map((question) =>
+        question.id === questionId
+          ? {
+              ...question,
+              criteria: [...question.criteria, { label: "", points: 1 }],
+            }
+          : question
+      )
+    );
+  }
+
+  function removeCriterion(questionId, criterionIndex) {
+    setQuestions((current) =>
+      current.map((question) =>
+        question.id === questionId
+          ? {
+              ...question,
+              criteria: question.criteria.filter(
+                (_, index) => index !== criterionIndex
+              ),
+            }
+          : question
+      )
+    );
+  }
+
+  function updateCriterion(questionId, criterionIndex, field, value) {
+    setQuestions((current) =>
+      current.map((question) => {
+        if (question.id !== questionId) {
+          return question;
+        }
+
+        const updatedCriteria = question.criteria.map((criterion, index) =>
+          index === criterionIndex
+            ? { ...criterion, [field]: value }
+            : criterion
+        );
+
+        return { ...question, criteria: updatedCriteria };
+      })
+    );
+  }
+
   async function handleCreate(status) {
     setError("");
     setSaving(true);
@@ -104,6 +151,12 @@ export default function ManualCreate() {
         questions: questions.map(({ id, ...question }) => ({
           ...question,
           points: Number(question.points),
+          criteria: question.criteria
+            .filter((criterion) => criterion.label.trim())
+            .map((criterion) => ({
+              label: criterion.label.trim(),
+              points: Number(criterion.points) || 0,
+            })),
         })),
       });
 
@@ -349,6 +402,82 @@ export default function ManualCreate() {
                   />
                 </div>
               </div>
+
+              {question.type !== "QCM" && (
+                <div className="space-y-3 rounded-lg border border-dashed p-4">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">
+                      Barème détaillé (optionnel)
+                    </label>
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => addCriterion(question.id)}
+                    >
+                      <Plus className="size-4" />
+                      Ajouter un critère
+                    </Button>
+                  </div>
+
+                  {question.criteria.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Sans critère, la question est notée sur un score
+                      global. Ajoute des critères (ex. « Clarté », «
+                      Exactitude ») pour une correction plus transparente.
+                    </p>
+                  ) : (
+                    question.criteria.map((criterion, criterionIndex) => (
+                      <div
+                        key={criterionIndex}
+                        className="flex items-center gap-2"
+                      >
+                        <Input
+                          value={criterion.label}
+                          onChange={(event) =>
+                            updateCriterion(
+                              question.id,
+                              criterionIndex,
+                              "label",
+                              event.target.value
+                            )
+                          }
+                          placeholder={`Critère ${criterionIndex + 1}`}
+                          className="flex-1"
+                        />
+
+                        <Input
+                          type="number"
+                          min="0"
+                          value={criterion.points}
+                          onChange={(event) =>
+                            updateCriterion(
+                              question.id,
+                              criterionIndex,
+                              "points",
+                              event.target.value
+                            )
+                          }
+                          placeholder="Pts"
+                          className="w-20"
+                        />
+
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          onClick={() =>
+                            removeCriterion(question.id, criterionIndex)
+                          }
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </CardContent>

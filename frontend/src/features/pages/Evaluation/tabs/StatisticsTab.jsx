@@ -294,15 +294,25 @@ function getStudentName(attempt) {
 
 /**
  * Échappe une valeur pour un champ CSV (RFC 4180).
+ *
+ * Neutralise aussi l'injection de formule : "Étudiant"/"Email"
+ * proviennent d'une saisie libre côté étudiant (aucun compte requis
+ * pour rejoindre une évaluation), donc un nom du type
+ * `=HYPERLINK(...)` ne doit pas pouvoir être interprété comme une
+ * formule par Excel/LibreOffice à l'ouverture du fichier exporté.
  */
 function csvEscape(value) {
   const stringValue = String(value ?? "");
 
-  if (/["\n;]/.test(stringValue)) {
-    return `"${stringValue.replace(/"/g, '""')}"`;
+  const safeValue = /^[=+\-@\t\r]/.test(stringValue)
+    ? `'${stringValue}`
+    : stringValue;
+
+  if (/["\n;]/.test(safeValue)) {
+    return `"${safeValue.replace(/"/g, '""')}"`;
   }
 
-  return stringValue;
+  return safeValue;
 }
 
 /**
@@ -365,11 +375,12 @@ function downloadResultsCsv(evaluation, sortedAttempts, maximumScore, passingSco
     .join("\r\n");
 
   // Excel en français attend ";" comme séparateur (la virgule sert de
-  // séparateur décimal) : sans ça, tout finit dans la colonne A. Le
-  // directive "sep=" force Excel à le reconnaître quelle que soit sa
-  // configuration régionale. Le BOM UTF-8 assure un affichage correct
-  // des accents.
-  const blob = new Blob(["﻿sep=;\r\n" + csvContent], {
+  // séparateur décimal) : sans ça, tout finit dans la colonne A. Pas de
+  // directive "sep=" ici : dans certaines versions d'Excel, elle lui
+  // fait ignorer le BOM UTF-8 et retomber sur l'ANSI système, ce qui
+  // casse les accents. Le BOM UTF-8 seul suffit avec ";" comme
+  // séparateur, qui est déjà le défaut d'Excel en français.
+  const blob = new Blob(["﻿" + csvContent], {
     type: "text/csv;charset=utf-8;",
   });
 

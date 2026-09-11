@@ -29,4 +29,9 @@ router.post(
   controller.duplicate
 );
 
+router.get(
+  "/:id/questions/:questionId/answers",
+  controller.getQuestionAnswers
+);
+
 module.exports = router;

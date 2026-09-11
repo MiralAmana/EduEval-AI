@@ -1,6 +1,7 @@
 const evaluationService = require(
   "../services/evaluation.service"
 );
+const attemptService = require("../services/attempt.service");
 
 const allowedContentTypes = [
   "EXERCISE",
@@ -115,6 +116,28 @@ function validateEvaluationPayload(body, partial = false) {
       return `Les points de la question ${
         index + 1
       } sont invalides.`;
+    }
+
+    if (question.criteria !== undefined) {
+      if (!Array.isArray(question.criteria)) {
+        return `Le barème de la question ${
+          index + 1
+        } est invalide.`;
+      }
+
+      for (const criterion of question.criteria) {
+        if (!criterion?.label || !String(criterion.label).trim()) {
+          return `Chaque critère du barème de la question ${
+            index + 1
+          } doit avoir un intitulé.`;
+        }
+
+        if (!(Number(criterion.points) > 0)) {
+          return `Chaque critère du barème de la question ${
+            index + 1
+          } doit valoir plus de zéro point.`;
+        }
+      }
     }
   }
 
@@ -282,6 +305,26 @@ async function duplicate(req, res, next) {
   }
 }
 
+async function getQuestionAnswers(req, res, next) {
+  try {
+    const payload = await attemptService.getQuestionAnswersForReview(
+      req.params.id,
+      req.params.questionId,
+      req.userId
+    );
+
+    if (!payload) {
+      return res.status(404).json({
+        message: "Question introuvable pour cette évaluation.",
+      });
+    }
+
+    return res.json(payload);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   create,
   getAll,
@@ -290,4 +333,5 @@ module.exports = {
   remove,
   updateStatus,
   duplicate,
+  getQuestionAnswers,
 };

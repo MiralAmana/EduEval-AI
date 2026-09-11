@@ -133,9 +133,13 @@ async function review(req, res, next) {
 
 async function gradeAnswer(req, res, next) {
   try {
-    const { score, feedback } = req.body || {};
+    const { score, feedback, criterionScores } = req.body || {};
+    const usesCriteria = Array.isArray(criterionScores);
 
-    if (score === undefined || score === null || Number.isNaN(Number(score))) {
+    if (
+      !usesCriteria &&
+      (score === undefined || score === null || Number.isNaN(Number(score)))
+    ) {
       return res.status(400).json({
         message: "La note est obligatoire.",
       });
@@ -145,7 +149,7 @@ async function gradeAnswer(req, res, next) {
       req.params.id,
       req.params.questionId,
       req.userId,
-      { score, feedback }
+      { score, feedback, criterionScores }
     );
 
     return res.json(payload);

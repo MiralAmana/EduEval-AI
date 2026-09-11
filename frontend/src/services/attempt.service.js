@@ -52,10 +52,14 @@ export async function reviewAttempt(attemptId) {
   return response.data;
 }
 
-export async function gradeAnswer(attemptId, questionId, { score, feedback }) {
+export async function gradeAnswer(
+  attemptId,
+  questionId,
+  { score, feedback, criterionScores }
+) {
   const response = await api.put(
     `/api/attempts/${attemptId}/answers/${questionId}/grade`,
-    { score, feedback }
+    { score, feedback, criterionScores }
   );
 
   return response.data;

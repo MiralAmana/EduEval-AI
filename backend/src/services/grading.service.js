@@ -20,7 +20,58 @@ function formatPriorGrading(priorGrading) {
     .join("\n");
 }
 
-async function gradeAnswerWithAI(question, textAnswer, priorGrading = []) {
+function formatCriteriaList(criteria) {
+  return criteria
+    .map(
+      (criterion) =>
+        `- id "${criterion.id}" — ${criterion.label} (${criterion.points} pt${
+          criterion.points > 1 ? "s" : ""
+        } max)`
+    )
+    .join("\n");
+}
+
+function buildResponseFormatInstructions(criteria) {
+  if (criteria.length === 0) {
+    return `Retourne exactement ce JSON :
+
+{
+  "score": 0,
+  "feedback": "Courte justification en français, deux phrases maximum."
+}
+
+Règles :
+
+- Le score doit être un nombre entre 0 et le barème total de la question, décimales autorisées.`;
+  }
+
+  return `Cette question a un barème détaillé : note chaque critère
+séparément plutôt que d'attribuer une note globale.
+
+Critères à noter :
+${formatCriteriaList(criteria)}
+
+Retourne exactement ce JSON :
+
+{
+  "criteriaScores": [
+    { "criterionId": "id du critère", "points": 0 }
+  ],
+  "feedback": "Courte justification en français, deux phrases maximum."
+}
+
+Règles :
+
+- Inclus une entrée par critère listé ci-dessus, avec le même "criterionId".
+- Chaque "points" doit être un nombre entre 0 et le maximum indiqué pour ce critère, décimales autorisées.`;
+}
+
+async function gradeAnswerWithAI(
+  question,
+  textAnswer,
+  priorGrading = [],
+  criteria = []
+) {
   const prompt = `
 Corrige la réponse d’un étudiant à une question d’évaluation.
 
@@ -37,16 +88,8 @@ Corrections déjà effectuées sur cette même copie (reste cohérent avec
 le niveau d’exigence déjà appliqué) :
 ${formatPriorGrading(priorGrading)}
 
-Retourne exactement ce JSON :
+${buildResponseFormatInstructions(criteria)}
 
-{
-  "score": 0,
-  "feedback": "Courte justification en français, deux phrases maximum."
-}
-
-Règles :
-
-- Le score doit être un nombre entre 0 et ${question.points}, décimales autorisées.
 - Sois rigoureux mais bienveillant.
 - Ne retourne aucun texte en dehors du JSON.
 `;
@@ -54,7 +97,7 @@ Règles :
   const response = await askAI(prompt, {
     json: true,
     temperature: 0,
-    maxTokens: 400,
+    maxTokens: 500,
     systemPrompt:
       "Tu es un enseignant qui corrige des copies avec rigueur et bienveillance.",
   });
@@ -71,6 +114,40 @@ Règles :
     throw error;
   }
 
+  if (criteria.length > 0) {
+    const criteriaById = new Map(
+      criteria.map((criterion) => [criterion.id, criterion])
+    );
+
+    const criterionScores = (
+      Array.isArray(parsed.criteriaScores) ? parsed.criteriaScores : []
+    )
+      .filter((entry) => criteriaById.has(entry?.criterionId))
+      .map((entry) => {
+        const criterion = criteriaById.get(entry.criterionId);
+        const rawPoints = Number(entry.points);
+        const points = Number.isFinite(rawPoints)
+          ? Math.min(Math.max(rawPoints, 0), criterion.points)
+          : 0;
+
+        return {
+          criterionId: entry.criterionId,
+          pointsAwarded: points,
+        };
+      });
+
+    const score = criterionScores.reduce(
+      (sum, entry) => sum + entry.pointsAwarded,
+      0
+    );
+
+    return {
+      score,
+      feedback: String(parsed.feedback || "").trim(),
+      criterionScores,
+    };
+  }
+
   const rawScore = Number(parsed.score);
   const score = Number.isFinite(rawScore)
     ? Math.min(Math.max(rawScore, 0), question.points)
@@ -79,6 +156,7 @@ Règles :
   return {
     score,
     feedback: String(parsed.feedback || "").trim(),
+    criterionScores: null,
   };
 }
 
