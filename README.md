@@ -7,7 +7,7 @@ Une plateforme full-stack permettant aux enseignants de créer, publier et corri
 ## Fonctionnalités
 
 **Côté enseignant**
-- Créer des évaluations manuellement, les générer par IA (Groq/Llama 3.3), ou les importer depuis un PDF
+- Créer des évaluations manuellement, les générer par IA (Groq/GPT-OSS 120B), ou les importer depuis un PDF
 - Publication instantanée avec un code d'accès unique (régénérable à tout moment, avec confirmation)
 - Suivre les soumissions par évaluation : qui a répondu, quand, et avec quel statut
 - Correction : les QCM sont notés automatiquement ; les réponses ouvertes peuvent être corrigées manuellement ou avec l'aide de l'IA, toujours modifiables par l'enseignant avant la publication des résultats
@@ -28,7 +28,7 @@ Une plateforme full-stack permettant aux enseignants de créer, publier et corri
 | Backend | Express 5, Prisma ORM |
 | Base de données | PostgreSQL (Neon, serverless) |
 | Authentification | JWT (7 jours) via header `Authorization`, stocké en `localStorage` côté navigateur (pas de cookies — voir ci-dessous pour le compromis de sécurité) |
-| IA | API Groq (Llama 3.3 70B) pour la génération d'évaluations et la correction assistée |
+| IA | API Groq (GPT-OSS 120B, modèle configurable via `GROQ_MODEL`) pour la génération d'évaluations et la correction assistée |
 | Email | Resend, pour les notifications de publication des résultats |
 | Déploiement | GitHub Pages (frontend) · Render (backend) · Neon (base de données) |
 

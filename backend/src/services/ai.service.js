@@ -1,6 +1,8 @@
 const axios = require("axios");
 
-const DEFAULT_MODEL = "llama-3.3-70b-versatile";
+// llama-3.3-70b-versatile est passé "Enterprise" chez Groq (model_not_found
+// pour un compte standard) : on part sur un modèle de production en libre accès.
+const DEFAULT_MODEL = "openai/gpt-oss-120b";
 const MAX_RETRIES = 2;
 const DEFAULT_RETRY_BASE_DELAY_MS = 500;
 

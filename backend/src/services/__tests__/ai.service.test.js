@@ -55,7 +55,7 @@ describe("askAI", () => {
     await askAI("prompt");
 
     const [, body] = mockPost.mock.calls[0];
-    expect(body.model).toBe("llama-3.3-70b-versatile");
+    expect(body.model).toBe("openai/gpt-oss-120b");
   });
 
   it("utilise GROQ_MODEL quand il est défini", async () => {
