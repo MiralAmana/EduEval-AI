@@ -5,6 +5,8 @@
 
 **Mise à jour du 2026-09-11 :** les deux constats de sévérité élevée/moyenne prioritaires (n°1 XSS stockée, n°2 injection CSV) ont été corrigés — voir « Correctifs appliqués » en fin de fichier. Les constats 3 à 8 restent ouverts.
 
+**Mise à jour du 2026-09-25 :** le risque résiduel lié au stockage du JWT en `localStorage` (facteur aggravant de toute XSS future) est désormais documenté dans le [README](README.md) (ligne « Authentification » du tableau + puce « Compromis de sécurité connu » dans « Choix d'architecture »). Pas de changement de code : le stockage lui-même reste à traiter si le projet évolue vers un déploiement same-site (cookie `HttpOnly`).
+
 ---
 
 ## Résumé

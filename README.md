@@ -27,7 +27,7 @@ Une plateforme full-stack permettant aux enseignants de créer, publier et corri
 | Frontend | React 19, Vite, Tailwind CSS, shadcn/ui, React Router 7 |
 | Backend | Express 5, Prisma ORM |
 | Base de données | PostgreSQL (Neon, serverless) |
-| Authentification | JWT via header `Authorization` (pas de cookies — voir ci-dessous) |
+| Authentification | JWT (7 jours) via header `Authorization`, stocké en `localStorage` côté navigateur (pas de cookies — voir ci-dessous pour le compromis de sécurité) |
 | IA | API Groq (Llama 3.3 70B) pour la génération d'évaluations et la correction assistée |
 | Email | Resend, pour les notifications de publication des résultats |
 | Déploiement | GitHub Pages (frontend) · Render (backend) · Neon (base de données) |
@@ -35,6 +35,7 @@ Une plateforme full-stack permettant aux enseignants de créer, publier et corri
 ## Choix d'architecture
 
 - **Authentification cross-domaine** : le frontend et le backend sont déployés sur deux domaines totalement différents (GitHub Pages / Render). Les sessions par cookie ne survivent pas de façon fiable à cette configuration — Safari bloque les cookies tiers par défaut — donc l'authentification repose sur un token Bearer délivré à la connexion/inscription et attaché automatiquement via un intercepteur Axios.
+  - **Compromis de sécurité connu** : ce token est conservé en `localStorage`, donc lisible par tout script exécuté sur la page. Une faille XSS *n'importe où* dans l'application permettrait de le voler et de prendre le contrôle du compte enseignant pour toute la durée de validité du token (7 jours). Le vecteur identifié à ce jour (aperçu HTML des fichiers Word/Excel déposés par les étudiants) est neutralisé par une sanitisation côté backend, mais le risque de fond demeure : toute nouvelle utilisation de `dangerouslySetInnerHTML` ou d'un contenu utilisateur non échappé doit être traitée comme critique. Voir `AUDIT.md`.
 - **Routage SPA sur hébergement statique** : GitHub Pages ne permet aucune réécriture d'URL côté serveur, donc les routes côté client (`/evaluations/:id`, liens profonds, rafraîchissements) sont gérées via l'astuce classique de redirection 404→index, combinée à une configuration du routeur consciente du sous-répertoire du projet.
 - **Intégrité de la correction** : un étudiant ne voit sa note immédiatement que si l'évaluation entière est auto-corrigeable (QCM pur). Toute évaluation contenant des questions ouvertes nécessite une revue explicite de l'enseignant et une action volontaire de "publication des résultats" avant que l'étudiant ne soit notifié.
 - **CI/CD** : un workflow GitHub Actions construit et déploie le frontend sur GitHub Pages à chaque push sur `main`.
