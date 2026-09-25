@@ -857,6 +857,39 @@ describe("getAnswerFilePreview", () => {
     expect(result.html).toContain("clic");
   });
 
+  it("n'affiche pas le titre technique 'SheetJS Table Export' de l'enveloppe HTML de xlsx", async () => {
+    const attempt = buildAttemptFixture({
+      answers: [
+        {
+          questionId: "q-short",
+          filePath: "answers/x/notes.xlsx",
+          fileName: "notes.xlsx",
+        },
+      ],
+    });
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+    storageService.downloadFileBuffer.mockResolvedValue(
+      Buffer.from("xlsx-bytes")
+    );
+    XLSX.read.mockReturnValue({
+      SheetNames: ["Feuil1"],
+      Sheets: { Feuil1: {} },
+    });
+    XLSX.utils.sheet_to_html.mockReturnValue(
+      '<html><head><meta charset="utf-8"/><title>SheetJS Table Export</title></head><body><table><tr><td>Note</td></tr></table></body></html>'
+    );
+
+    const result = await getAnswerFilePreview(
+      "attempt-1",
+      "q-short",
+      "teacher-1"
+    );
+
+    expect(result.html).not.toContain("SheetJS");
+    expect(result.html).toContain("<td>Note</td>");
+  });
+
   it("renvoie unsupported pour un type de fichier non pris en charge, sans téléchargement", async () => {
     const attempt = buildAttemptFixture({
       answers: [

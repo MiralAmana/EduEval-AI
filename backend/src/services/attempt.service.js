@@ -1241,6 +1241,9 @@ const FILE_PREVIEW_SANITIZE_OPTIONS = {
     th: ["colspan", "rowspan"],
     col: ["span"],
   },
+  // sheet_to_html enveloppe le tableau dans <html><head><title>SheetJS Table
+  // Export</title>… : sans "title"/"head" ici, le texte du titre s'afficherait.
+  nonTextTags: ["script", "style", "textarea", "option", "title", "head"],
   allowedSchemes: ["http", "https", "mailto"],
   allowedSchemesByTag: {
     img: ["data", "http", "https"],
