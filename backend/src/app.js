@@ -2,6 +2,8 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 
+const { errorHandler } = require("./middleware/error.middleware");
+
 const authRoutes = require("./routes/auth.routes");
 const aiRoutes = require("./routes/ai.routes");
 const pdfRoutes = require("./routes/pdf.routes");
@@ -55,14 +57,6 @@ app.use((req, res) => {
   });
 });
 
-app.use((error, req, res, next) => {
-  console.error(error);
-
-  return res.status(error.status || 500).json({
-    message:
-      error.message ||
-      "Une erreur interne est survenue.",
-  });
-});
+app.use(errorHandler);
 
 module.exports = app;
