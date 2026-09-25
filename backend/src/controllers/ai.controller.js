@@ -1,4 +1,3 @@
-const { askAI } = require("../services/ai.service");
 const {
   generateEvaluation,
 } = require("../services/evaluationGeneration.service");
@@ -24,21 +23,6 @@ function validateGeneratePayload({ subject, questionCount, totalPoints }) {
   }
 
   return null;
-}
-
-async function test(req, res) {
-  try {
-    const response = await askAI(
-      "Réponds uniquement par : Bonjour Charlize."
-    );
-
-    return res.json({ response });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Impossible de communiquer avec Groq.",
-      error: error.response?.data || error.message,
-    });
-  }
 }
 
 async function generate(req, res, next) {
@@ -70,6 +54,5 @@ async function generate(req, res, next) {
 }
 
 module.exports = {
-  test,
   generate,
 };

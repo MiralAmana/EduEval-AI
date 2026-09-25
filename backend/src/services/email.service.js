@@ -10,6 +10,18 @@ function getClient() {
   return new Resend(process.env.RESEND_API_KEY);
 }
 
+// Le prénom (saisi librement par l'étudiant) et le titre de l'évaluation
+// sont insérés dans du HTML : sans échappement, ils permettraient
+// d'injecter du contenu trompeur (phishing) dans l'email envoyé.
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function sendResultsPublishedEmail({
   to,
   firstName,
@@ -24,8 +36,8 @@ async function sendResultsPublishedEmail({
     to,
     subject: `Votre note pour « ${evaluationTitle} » est disponible`,
     html: `
-      <p>Bonjour ${firstName},</p>
-      <p>Votre évaluation « ${evaluationTitle} » a été corrigée par votre enseignant.</p>
+      <p>Bonjour ${escapeHtml(firstName)},</p>
+      <p>Votre évaluation « ${escapeHtml(evaluationTitle)} » a été corrigée par votre enseignant.</p>
       <p style="font-size: 18px;"><strong>Note obtenue : ${score} / ${maxScore}</strong></p>
       <p>— EduEval AI</p>
     `,
@@ -40,9 +52,9 @@ async function sendPasswordResetEmail({ to, firstName, resetLink }) {
     to,
     subject: "Réinitialisation de votre mot de passe EduEval AI",
     html: `
-      <p>Bonjour ${firstName},</p>
+      <p>Bonjour ${escapeHtml(firstName)},</p>
       <p>Vous avez demandé la réinitialisation de votre mot de passe.</p>
-      <p><a href="${resetLink}">Cliquez ici pour choisir un nouveau mot de passe</a></p>
+      <p><a href="${escapeHtml(resetLink)}">Cliquez ici pour choisir un nouveau mot de passe</a></p>
       <p>Ce lien expire dans 1 heure. Si vous n’êtes pas à l’origine de cette demande, ignorez cet email.</p>
       <p>— EduEval AI</p>
     `,

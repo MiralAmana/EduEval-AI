@@ -17,7 +17,6 @@ const generateEvaluationLimiter = rateLimit({
   },
 });
 
-router.get("/test", controller.test);
 router.post(
   "/generate-evaluation",
   generateEvaluationLimiter,

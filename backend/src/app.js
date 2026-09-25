@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 
 const authRoutes = require("./routes/auth.routes");
 const aiRoutes = require("./routes/ai.routes");
@@ -22,6 +23,8 @@ const allowedOrigins = (
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+
+app.use(helmet());
 
 app.use(
   cors({
