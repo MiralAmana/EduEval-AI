@@ -31,7 +31,10 @@ const pdfUpload = multer({
 
     if (!isPdf) {
       return callback(
-        new Error("Seuls les véritables fichiers PDF sont acceptés.")
+        Object.assign(
+          new Error("Seuls les véritables fichiers PDF sont acceptés."),
+          { status: 400 }
+        )
       );
     }
 

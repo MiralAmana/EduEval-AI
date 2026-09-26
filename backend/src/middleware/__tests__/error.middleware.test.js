@@ -52,6 +52,34 @@ describe("errorHandler", () => {
     expect(res.json).toHaveBeenCalledWith({ message: "Un compte existe déjà." });
   });
 
+  it("répond 413 avec un message clair quand un fichier dépasse la taille maximale (et non un 500 en anglais)", () => {
+    const res = buildRes();
+    const multerError = Object.assign(new Error("File too large"), {
+      name: "MulterError",
+      code: "LIMIT_FILE_SIZE",
+    });
+
+    errorHandler(multerError, {}, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(413);
+    expect(res.json).toHaveBeenCalledWith({
+      message: "Fichier trop volumineux (10 Mo maximum).",
+    });
+    expect(console.error).not.toHaveBeenCalled(); // erreur du client, pas du serveur
+  });
+
+  it("répond 400 pour les autres refus de multer", () => {
+    const res = buildRes();
+    const multerError = Object.assign(new Error("Unexpected field"), {
+      name: "MulterError",
+      code: "LIMIT_UNEXPECTED_FILE",
+    });
+
+    errorHandler(multerError, {}, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
   it("répond 500 par défaut", () => {
     const res = buildRes();
 

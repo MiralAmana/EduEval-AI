@@ -26,9 +26,13 @@ export async function saveFileAnswer(attemptId, questionId, file) {
 
   formData.append("file", file);
 
+  // Un fichier de 10 Mo sur une connexion mobile lente met facilement plus de
+  // 30 s (le délai par défaut du client) : le dépôt échouait alors côté
+  // navigateur alors que le serveur le recevait encore.
   const response = await api.post(
     `/api/attempts/${attemptId}/answers/${questionId}/file`,
-    formData
+    formData,
+    { timeout: 180000 }
   );
 
   return response.data;

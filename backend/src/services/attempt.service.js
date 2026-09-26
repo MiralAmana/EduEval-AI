@@ -1,4 +1,3 @@
-const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const mammoth = require("mammoth");
@@ -694,8 +693,10 @@ async function saveFileAnswer(
     fileName
   );
 
+  // Le fichier temporaire est supprimé par l'appelant (contrôleur), dans
+  // tous les cas — succès, refus ou erreur — et pas seulement après un envoi
+  // réussi.
   await storageService.uploadFile(localFilePath, objectKey, contentType);
-  await fs.unlink(localFilePath).catch(() => {});
 
   if (existingAnswer?.filePath) {
     await storageService.deleteFile(existingAnswer.filePath);

@@ -18,6 +18,19 @@ function errorHandler(error, req, res, next) {
     });
   }
 
+  // Refus de multer (fichier trop gros, champ inattendu…) : erreur du client,
+  // pas du serveur. Sans ça, un élève qui dépose un fichier trop lourd
+  // recevait un 500 « File too large » en anglais.
+  if (error.name === "MulterError") {
+    const tooLarge = error.code === "LIMIT_FILE_SIZE";
+
+    return res.status(tooLarge ? 413 : 400).json({
+      message: tooLarge
+        ? "Fichier trop volumineux (10 Mo maximum)."
+        : "Fichier invalide.",
+    });
+  }
+
   console.error(error);
 
   return res.status(error.status || 500).json({

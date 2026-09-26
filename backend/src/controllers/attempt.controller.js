@@ -1,3 +1,5 @@
+const fs = require("node:fs/promises");
+
 const attemptService = require("../services/attempt.service");
 
 function validateJoinPayload({ code, firstName, lastName, email }) {
@@ -89,6 +91,14 @@ async function saveFileAnswer(req, res, next) {
     return res.json(payload);
   } catch (error) {
     return next(error);
+  } finally {
+    // multer a déjà écrit le fichier sur le disque avant que la requête soit
+    // validée : sans ce nettoyage systématique, un dépôt refusé (tentative
+    // déjà soumise, question inconnue) ou en échec laissait jusqu'à 10 Mo
+    // sur le disque à chaque fois.
+    if (req.file?.path) {
+      await fs.unlink(req.file.path).catch(() => {});
+    }
   }
 }
 
