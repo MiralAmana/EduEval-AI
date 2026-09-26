@@ -11,6 +11,9 @@ router.use(requireAuth);
 
 router.get("/", controller.getAll);
 
+// Avant "/:id" : sinon "participants" serait pris pour un identifiant.
+router.get("/participants", controller.getParticipants);
+
 router.post("/", controller.create);
 
 router.get("/:id", controller.getOne);

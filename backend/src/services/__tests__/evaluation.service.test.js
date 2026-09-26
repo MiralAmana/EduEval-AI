@@ -23,6 +23,9 @@ jest.mock("../../lib/prisma", () => ({
     delete: jest.fn(),
     create: jest.fn(),
   },
+  attempt: {
+    findMany: jest.fn(),
+  },
   $transaction: jest.fn((callback) => callback(mockTransactionClient)),
 }));
 
@@ -217,7 +220,48 @@ describe("getEvaluations / getEvaluationById", () => {
     expect(prisma.evaluation.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: "user-1" } })
     );
-    expect(result).toEqual([{ id: "eval-1" }]);
+    expect(result).toMatchObject([{ id: "eval-1" }]);
+  });
+
+  it("ne charge pour la liste ni les questions, ni les choix, ni les tentatives (forme allégée)", async () => {
+    prisma.evaluation.findMany.mockResolvedValue([]);
+
+    await evaluationService.getEvaluations("user-1");
+
+    const { include } = prisma.evaluation.findMany.mock.calls[0][0];
+
+    expect(include.questions).toBeUndefined();
+    expect(include.user).toBeUndefined();
+    expect(include.publications.select).toMatchObject({
+      id: true,
+      code: true,
+      status: true,
+      _count: { select: { attempts: true } },
+    });
+    // Ni tentatives ni élèves dans les publications de la liste.
+    expect(include.publications.select.attempts).toBeUndefined();
+    expect(include.publications.include).toBeUndefined();
+    expect(include._count.select).toEqual({ questions: true, publications: true });
+  });
+
+  it("ajoute le total des tentatives de toutes les publications dans _count.attempts", async () => {
+    prisma.evaluation.findMany.mockResolvedValue([
+      {
+        id: "eval-1",
+        _count: { questions: 5, publications: 2 },
+        publications: [{ _count: { attempts: 3 } }, { _count: { attempts: 4 } }],
+      },
+      {
+        id: "eval-2",
+        _count: { questions: 1, publications: 0 },
+        publications: [],
+      },
+    ]);
+
+    const result = await evaluationService.getEvaluations("user-1");
+
+    expect(result[0]._count).toEqual({ questions: 5, publications: 2, attempts: 7 });
+    expect(result[1]._count).toEqual({ questions: 1, publications: 0, attempts: 0 });
   });
 
   it("renvoie null si l'évaluation n'appartient pas à l'enseignant", async () => {
@@ -449,6 +493,104 @@ describe("updateEvaluationStatus", () => {
 
     expect(mockTransactionClient.publication.create).toHaveBeenCalledTimes(1);
   });
+
+  it("renvoie la forme allégée de la liste (avec le total des tentatives), pas l'évaluation complète", async () => {
+    mockTransactionClient.evaluation.findFirst.mockResolvedValue({ id: "eval-1" });
+    mockTransactionClient.evaluation.update.mockResolvedValue({
+      id: "eval-1",
+      status: "DISABLED",
+    });
+    mockTransactionClient.evaluation.findUnique.mockResolvedValue({
+      id: "eval-1",
+      _count: { questions: 3, publications: 1 },
+      publications: [{ _count: { attempts: 250 } }],
+    });
+
+    const result = await evaluationService.updateEvaluationStatus(
+      "eval-1",
+      "user-1",
+      "DISABLED"
+    );
+
+    const { include } = mockTransactionClient.evaluation.findUnique.mock.calls[0][0];
+
+    expect(include.questions).toBeUndefined();
+    expect(include.publications.select.attempts).toBeUndefined();
+    expect(result._count.attempts).toBe(250);
+  });
+});
+
+describe("getParticipantsByEvaluation", () => {
+  const attempt = (id, evaluationId, evaluationTitle, startedAt) => ({
+    id,
+    startedAt: new Date(startedAt),
+    status: "SUBMITTED",
+    exitCount: 0,
+    resultsPublished: false,
+    student: { firstName: "Ada", lastName: "L", email: `${id}@x.co` },
+    publication: { evaluation: { id: evaluationId, title: evaluationTitle } },
+  });
+
+  it("ne sélectionne que les champs affichés et filtre sur l'enseignant", async () => {
+    prisma.attempt.findMany.mockResolvedValue([]);
+
+    await evaluationService.getParticipantsByEvaluation("user-1");
+
+    const args = prisma.attempt.findMany.mock.calls[0][0];
+
+    expect(args.where).toEqual({
+      publication: { evaluation: { userId: "user-1" } },
+    });
+    expect(args.orderBy).toEqual({ startedAt: "desc" });
+    expect(args.include).toBeUndefined();
+    expect(Object.keys(args.select).sort()).toEqual(
+      [
+        "exitCount",
+        "id",
+        "publication",
+        "resultsPublished",
+        "startedAt",
+        "status",
+        "student",
+      ].sort()
+    );
+    // Ni réponses, ni questions.
+    expect(args.select.answers).toBeUndefined();
+  });
+
+  it("groupe par évaluation, tentatives les plus récentes d'abord, groupes ordonnés par leur tentative la plus récente", async () => {
+    // Déjà triées par startedAt décroissant, comme le fait la requête.
+    prisma.attempt.findMany.mockResolvedValue([
+      attempt("a1", "eval-B", "Éval B", "2026-09-26T10:00:00Z"),
+      attempt("a2", "eval-A", "Éval A", "2026-09-26T09:00:00Z"),
+      attempt("a3", "eval-B", "Éval B", "2026-09-26T08:00:00Z"),
+      attempt("a4", "eval-A", "Éval A", "2026-09-25T09:00:00Z"),
+    ]);
+
+    const groups = await evaluationService.getParticipantsByEvaluation("user-1");
+
+    expect(groups.map((group) => group.evaluationId)).toEqual(["eval-B", "eval-A"]);
+    expect(groups[0]).toMatchObject({ evaluationTitle: "Éval B" });
+    expect(groups[0].attempts.map((a) => a.id)).toEqual(["a1", "a3"]);
+    expect(groups[1].attempts.map((a) => a.id)).toEqual(["a2", "a4"]);
+  });
+
+  it("n'expose pas l'évaluation imbriquée dans chaque tentative", async () => {
+    prisma.attempt.findMany.mockResolvedValue([
+      attempt("a1", "eval-A", "Éval A", "2026-09-26T10:00:00Z"),
+    ]);
+
+    const [group] = await evaluationService.getParticipantsByEvaluation("user-1");
+
+    expect(group.attempts[0]).not.toHaveProperty("publication");
+    expect(group.attempts[0].student.email).toBe("a1@x.co");
+  });
+
+  it("renvoie une liste vide quand l'enseignant n'a aucun participant", async () => {
+    prisma.attempt.findMany.mockResolvedValue([]);
+
+    expect(await evaluationService.getParticipantsByEvaluation("user-1")).toEqual([]);
+  });
 });
 
 describe("duplicateEvaluation", () => {
@@ -502,6 +644,8 @@ describe("duplicateEvaluation", () => {
     expect(createArgs.data.questions.create[0].criteria.create).toEqual([
       { label: "Exactitude", points: 2, position: 0 },
     ]);
-    expect(result).toEqual({ id: "eval-2" });
+    // Réponse au format de la liste (allégé), avec le total des tentatives.
+    expect(createArgs.include.questions).toBeUndefined();
+    expect(result).toMatchObject({ id: "eval-2", _count: { attempts: 0 } });
   });
 });

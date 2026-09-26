@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getEvaluations } from "@/services/evaluation.service";
+import { getParticipants } from "@/services/evaluation.service";
 
 const statusLabels = {
   IN_PROGRESS: "En cours",
@@ -34,27 +34,6 @@ const statusVariants = {
   EXPIRED: "secondary",
 };
 
-function groupAttemptsByEvaluation(evaluations) {
-  const groups = evaluations
-    .map((evaluation) => {
-      const attempts = (evaluation.publications || [])
-        .flatMap((publication) => publication.attempts || [])
-        .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
-
-      return {
-        evaluationId: evaluation.id,
-        evaluationTitle: evaluation.title,
-        attempts,
-      };
-    })
-    .filter((group) => group.attempts.length > 0);
-
-  return groups.sort(
-    (a, b) =>
-      new Date(b.attempts[0].startedAt) - new Date(a.attempts[0].startedAt)
-  );
-}
-
 export default function Students() {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -66,13 +45,11 @@ export default function Students() {
         setLoading(true);
         setError("");
 
-        const evaluations = await getEvaluations();
+        // Déjà groupés et triés côté serveur : seuls les champs affichés sont
+        // envoyés (avant, toute l'évaluation avec ses questions et ses choix).
+        const participants = await getParticipants();
 
-        setGroups(
-          groupAttemptsByEvaluation(
-            Array.isArray(evaluations) ? evaluations : []
-          )
-        );
+        setGroups(Array.isArray(participants) ? participants : []);
       } catch (requestError) {
         setError(
           requestError.response?.data?.message ||

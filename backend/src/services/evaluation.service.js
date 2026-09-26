@@ -124,6 +124,69 @@ const evaluationInclude = {
 };
 
 /**
+ * Forme allégée d'une évaluation pour la LISTE de l'enseignant : uniquement
+ * ce que la liste affiche (compteurs, statut, code d'accès de chaque
+ * publication). L'ancienne réponse embarquait aussi toutes les questions, tous
+ * les choix et TOUTES les tentatives avec leurs élèves : 1,1 Mo pour 15
+ * évaluations de 100 participants, et une taille qui croît avec chaque
+ * tentative. Le détail complet reste servi par getEvaluationById.
+ */
+const evaluationSummaryInclude = {
+  publications: {
+    orderBy: {
+      createdAt: "desc",
+    },
+
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      status: true,
+      duration: true,
+      availableAt: true,
+      closesAt: true,
+      createdAt: true,
+
+      _count: {
+        select: {
+          attempts: true,
+        },
+      },
+    },
+  },
+
+  _count: {
+    select: {
+      questions: true,
+      publications: true,
+    },
+  },
+};
+
+/**
+ * Ajoute `_count.attempts` (total sur toutes les publications) : la liste
+ * l'affiche mais Prisma ne sait pas compter à travers une relation imbriquée.
+ */
+function withAttemptTotal(evaluation) {
+  if (!evaluation) {
+    return evaluation;
+  }
+
+  const attempts = (evaluation.publications || []).reduce(
+    (total, publication) => total + (publication._count?.attempts || 0),
+    0
+  );
+
+  return {
+    ...evaluation,
+    _count: {
+      ...evaluation._count,
+      attempts,
+    },
+  };
+}
+
+/**
  * Garantit qu'une évaluation active possède une publication ACTIVE
  * (donc un code d'accès utilisable), en réactivant une publication
  * existante plutôt que d'en recréer une nouvelle.
@@ -234,7 +297,7 @@ async function createEvaluation(data, userId) {
 }
 
 async function getEvaluations(userId) {
-  return prisma.evaluation.findMany({
+  const evaluations = await prisma.evaluation.findMany({
     where: {
       userId,
     },
@@ -243,8 +306,78 @@ async function getEvaluations(userId) {
       createdAt: "desc",
     },
 
-    include: evaluationInclude,
+    include: evaluationSummaryInclude,
   });
+
+  return evaluations.map(withAttemptTotal);
+}
+
+/**
+ * Participants de toutes les évaluations de l'enseignant, groupés par
+ * évaluation (page « Étudiants »). Sélection minimale : ni questions, ni
+ * réponses, ni évaluation complète — seulement ce que le tableau affiche.
+ * Les tentatives sont triées de la plus récente à la plus ancienne ; les
+ * groupes suivent l'ordre de leur tentative la plus récente.
+ */
+async function getParticipantsByEvaluation(userId) {
+  const attempts = await prisma.attempt.findMany({
+    where: {
+      publication: {
+        evaluation: {
+          userId,
+        },
+      },
+    },
+
+    orderBy: {
+      startedAt: "desc",
+    },
+
+    select: {
+      id: true,
+      startedAt: true,
+      status: true,
+      exitCount: true,
+      resultsPublished: true,
+
+      student: {
+        select: {
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
+
+      publication: {
+        select: {
+          evaluation: {
+            select: {
+              id: true,
+              title: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const groups = new Map();
+
+  for (const { publication, ...attempt } of attempts) {
+    const { evaluation } = publication;
+
+    if (!groups.has(evaluation.id)) {
+      groups.set(evaluation.id, {
+        evaluationId: evaluation.id,
+        evaluationTitle: evaluation.title,
+        attempts: [],
+      });
+    }
+
+    groups.get(evaluation.id).attempts.push(attempt);
+  }
+
+  return [...groups.values()];
 }
 
 async function getEvaluationById(id, userId) {
@@ -388,13 +521,17 @@ async function updateEvaluationStatus(id, userId, status) {
       await deactivatePublications(transaction, id);
     }
 
-    return transaction.evaluation.findUnique({
-      where: {
-        id,
-      },
+    // Seule la liste enseignant appelle cette route et en fusionne la réponse
+    // dans son état : forme allégée, comme la liste.
+    return withAttemptTotal(
+      await transaction.evaluation.findUnique({
+        where: {
+          id,
+        },
 
-      include: evaluationInclude,
-    });
+        include: evaluationSummaryInclude,
+      })
+    );
   });
 }
 
@@ -433,7 +570,9 @@ async function duplicateEvaluation(id, userId) {
     return null;
   }
 
-  return prisma.evaluation.create({
+  // Comme updateEvaluationStatus : seule la liste enseignant en fusionne la
+  // réponse dans son état, forme allégée.
+  const duplicated = await prisma.evaluation.create({
     data: {
       title: `${sourceEvaluation.title} — Copie`,
       description: sourceEvaluation.description,
@@ -471,13 +610,16 @@ async function duplicateEvaluation(id, userId) {
       },
     },
 
-    include: evaluationInclude,
+    include: evaluationSummaryInclude,
   });
+
+  return withAttemptTotal(duplicated);
 }
 
 module.exports = {
   createEvaluation,
   getEvaluations,
+  getParticipantsByEvaluation,
   getEvaluationById,
   updateEvaluation,
   deleteEvaluation,

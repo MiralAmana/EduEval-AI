@@ -93,9 +93,13 @@ export default function Evaluations() {
         evaluation.title
           ?.toLowerCase()
           .includes(normalizedSearch) ||
-        evaluation.code
-          ?.toLowerCase()
-          .includes(normalizedSearch) ||
+        // Le code d'accès est porté par les publications, pas par
+        // l'évaluation : chercher `evaluation.code` ne trouvait jamais rien.
+        evaluation.publications?.some((publication) =>
+          publication.code
+            ?.toLowerCase()
+            .includes(normalizedSearch)
+        ) ||
         evaluation.description
           ?.toLowerCase()
           .includes(normalizedSearch);

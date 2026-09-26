@@ -22,6 +22,16 @@ export async function getEvaluations() {
   return response.data;
 }
 
+// Participants de toutes les évaluations, déjà groupés par évaluation
+// (page « Étudiants ») : [{ evaluationId, evaluationTitle, attempts: [...] }].
+export async function getParticipants() {
+  const response = await api.get(
+    "/api/evaluations/participants"
+  );
+
+  return response.data;
+}
+
 export async function getEvaluationById(
   evaluationId
 ) {

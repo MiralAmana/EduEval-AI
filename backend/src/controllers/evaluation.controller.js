@@ -181,6 +181,18 @@ async function getAll(req, res, next) {
   }
 }
 
+async function getParticipants(req, res, next) {
+  try {
+    const groups = await evaluationService.getParticipantsByEvaluation(
+      req.userId
+    );
+
+    return res.json(groups);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function getOne(req, res, next) {
   try {
     const evaluation =
@@ -328,6 +340,7 @@ async function getQuestionAnswers(req, res, next) {
 module.exports = {
   create,
   getAll,
+  getParticipants,
   getOne,
   update,
   remove,
