@@ -10,6 +10,7 @@ jest.mock("../../lib/prisma", () => ({
     upsert: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
   question: {
     findFirst: jest.fn(),
@@ -70,6 +71,7 @@ const {
   saveTextAnswer,
   saveFileAnswer,
   registerExit,
+  submitAttempt,
   getAttempt,
   getAnswerFileForTeacher,
   getAnswerFilePreview,
@@ -320,18 +322,63 @@ describe("gradeAttempt", () => {
     const total = await gradeAttempt("attempt-1", questions);
 
     expect(total).toBe(5); // 2 (QCM) + 3 (SHORT_TEXT)
-    expect(prisma.answer.update).toHaveBeenCalledTimes(2);
-    expect(prisma.answer.update).toHaveBeenCalledWith({
-      where: { id: "ans-1" },
+    // Une écriture par note distincte (ici 2 notes différentes : 2 et 3).
+    expect(prisma.answer.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.answer.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ans-1"] } },
       data: { score: 2 },
     });
-    expect(prisma.answer.update).toHaveBeenCalledWith({
-      where: { id: "ans-2" },
+    expect(prisma.answer.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ans-2"] } },
       data: { score: 3 },
     });
-    // Les mises à jour sont regroupées en une seule transaction plutôt
-    // qu'un aller-retour Prisma par question.
+    expect(prisma.answer.update).not.toHaveBeenCalled();
+    // Les écritures sont regroupées en une seule transaction.
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("regroupe en une seule écriture toutes les réponses qui ont la même note", async () => {
+    const questions = [
+      buildQcmQuestion({ id: "q1" }),
+      buildQcmQuestion({ id: "q2" }),
+      buildQcmQuestion({ id: "q3" }),
+    ];
+
+    prisma.answer.findMany.mockResolvedValue([
+      { id: "a1", questionId: "q1", textAnswer: "c-right" },
+      { id: "a2", questionId: "q2", textAnswer: "c-right" },
+      { id: "a3", questionId: "q3", textAnswer: "c-wrong" },
+    ]);
+
+    const total = await gradeAttempt("attempt-1", questions);
+
+    expect(total).toBe(4);
+    expect(prisma.answer.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.answer.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["a1", "a2"] } },
+      data: { score: 2 },
+    });
+    expect(prisma.answer.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["a3"] } },
+      data: { score: 0 },
+    });
+  });
+
+  it("n'écrase pas la note d'une question à corriger par l'enseignant", async () => {
+    const questions = [buildQcmQuestion(), buildLongTextQuestion()];
+
+    prisma.answer.findMany.mockResolvedValue([
+      { id: "ans-1", questionId: "q-qcm", textAnswer: "c-right" },
+      { id: "ans-2", questionId: "q-long", textAnswer: "texte", score: 4 },
+    ]);
+
+    await gradeAttempt("attempt-1", questions);
+
+    expect(prisma.answer.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.answer.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ans-1"] } },
+      data: { score: 2 },
+    });
   });
 
   it("ignore les questions sans réponse dans le total", async () => {
@@ -344,7 +391,7 @@ describe("gradeAttempt", () => {
     const total = await gradeAttempt("attempt-1", questions);
 
     expect(total).toBe(2);
-    expect(prisma.answer.update).toHaveBeenCalledTimes(1);
+    expect(prisma.answer.updateMany).toHaveBeenCalledTimes(1);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
@@ -425,21 +472,149 @@ describe("registerExit (régression : pas de double-fetch hors blocage)", () => 
       submittedAt: new Date("2026-08-01T10:30:00Z"),
     });
 
-    prisma.attempt.findUnique
-      .mockResolvedValueOnce(attempt) // requireActiveAttempt
-      .mockResolvedValueOnce(attempt) // refreshedAttempt avant finalizeAttempt
-      .mockResolvedValueOnce(blockedAttempt); // getAttempt final
-
-    prisma.attempt.update
-      .mockResolvedValueOnce({}) // incrément exitCount
-      .mockResolvedValueOnce({ ...blockedAttempt, answers: [] }); // finalizeAttempt
-
+    prisma.attempt.findUnique.mockResolvedValue(attempt);
+    prisma.attempt.update.mockResolvedValue({});
     prisma.answer.findMany.mockResolvedValue([]);
 
     const result = await registerExit("attempt-1");
 
-    expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(3);
+    // Le contexte n'est chargé qu'une fois : le blocage construit l'état
+    // final en mémoire au lieu de recharger la tentative deux fois de plus.
+    expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.attempt.update).toHaveBeenCalledWith({
+      where: { id: "attempt-1" },
+      data: expect.objectContaining({ status: "BLOCKED" }),
+    });
     expect(result.attempt.status).toBe("BLOCKED");
+    expect(result.attempt.exitCount).toBe(3);
+  });
+});
+
+describe("submitAttempt", () => {
+  it("note et clôture la tentative en une seule transaction, sans recharger le contexte complet", async () => {
+    const attempt = buildAttemptFixture();
+
+    prisma.attempt.findUnique.mockResolvedValue(attempt);
+    prisma.attempt.update.mockResolvedValue({});
+    prisma.answer.findMany.mockResolvedValue([
+      { id: "ans-1", questionId: "q-qcm", textAnswer: "c-right", criterionScores: [] },
+      { id: "ans-2", questionId: "q-short", textAnswer: "paris", criterionScores: [] },
+    ]);
+
+    const result = await submitAttempt("attempt-1");
+
+    expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.attempt.update).toHaveBeenCalledTimes(1);
+    expect(prisma.attempt.update).toHaveBeenCalledWith({
+      where: { id: "attempt-1" },
+      data: {
+        status: "SUBMITTED",
+        submittedAt: expect.any(Date),
+        score: 5,
+        resultsPublished: false,
+      },
+    });
+    expect(result.attempt.status).toBe("SUBMITTED");
+    expect(result.attempt.submittedAt).toBeInstanceOf(Date);
+    // Évaluation non 100 % QCM : la note reste masquée jusqu'à la publication.
+    expect(result.attempt.score).toBeNull();
+  });
+
+  it("révèle la note tout de suite pour une évaluation 100 % QCM, sans attendre l'email", async () => {
+    const attempt = buildAttemptFixture({
+      publication: {
+        ...buildAttemptFixture().publication,
+        evaluation: {
+          ...buildAttemptFixture().publication.evaluation,
+          questions: [buildQcmQuestion()],
+        },
+      },
+    });
+
+    prisma.attempt.findUnique.mockResolvedValue(attempt);
+    prisma.attempt.update.mockResolvedValue({});
+    prisma.answer.findMany.mockResolvedValue([
+      { id: "ans-1", questionId: "q-qcm", textAnswer: "c-right", criterionScores: [] },
+    ]);
+
+    // L'envoi de l'email ne se termine jamais : la soumission doit répondre quand même.
+    const { sendResultsPublishedEmail } = require("../email.service");
+    sendResultsPublishedEmail.mockReturnValueOnce(new Promise(() => {}));
+
+    const result = await submitAttempt("attempt-1");
+
+    expect(result.attempt.score).toBe(2);
+    expect(result.attempt.resultsPublished).toBe(true);
+    expect(result.questions[0].answer.score).toBe(2);
+    expect(sendResultsPublishedEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("est idempotent : une tentative déjà soumise renvoie son état sans rien écrire", async () => {
+    const attempt = buildAttemptFixture({
+      status: "SUBMITTED",
+      submittedAt: new Date(),
+    });
+
+    prisma.attempt.findUnique.mockResolvedValue(attempt);
+
+    const result = await submitAttempt("attempt-1");
+
+    expect(result.attempt.status).toBe("SUBMITTED");
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.attempt.update).not.toHaveBeenCalled();
+  });
+
+  it("clôture une tentative dont le temps est écoulé (EXPIRED) et renvoie son état au lieu d'une erreur", async () => {
+    const attempt = buildAttemptFixture({
+      endsAt: new Date(Date.now() - 1000),
+    });
+
+    prisma.attempt.findUnique.mockResolvedValue(attempt);
+    prisma.attempt.update.mockResolvedValue({});
+    prisma.answer.findMany.mockResolvedValue([]);
+
+    const result = await submitAttempt("attempt-1");
+
+    expect(prisma.attempt.update).toHaveBeenCalledWith({
+      where: { id: "attempt-1" },
+      data: expect.objectContaining({ status: "EXPIRED" }),
+    });
+    expect(result.attempt.status).toBe("EXPIRED");
+  });
+
+  it("répond 404 pour une tentative inconnue", async () => {
+    prisma.attempt.findUnique.mockResolvedValue(null);
+
+    await expect(submitAttempt("inconnue")).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
+  it("refuse la soumission si l'évaluation a été désactivée (403)", async () => {
+    const attempt = buildAttemptFixture();
+    attempt.publication.status = "DISABLED";
+
+    prisma.attempt.findUnique.mockResolvedValue(attempt);
+
+    await expect(submitAttempt("attempt-1")).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("met à jour le cache avec l'état final : la lecture suivante ne relit pas la base", async () => {
+    const attempt = buildAttemptFixture();
+
+    prisma.attempt.findUnique.mockResolvedValue(attempt);
+    prisma.attempt.update.mockResolvedValue({});
+    prisma.answer.findMany.mockResolvedValue([]);
+
+    await submitAttempt("attempt-1");
+    const result = await getAttempt("attempt-1");
+
+    expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(1);
+    expect(result.attempt.status).toBe("SUBMITTED");
   });
 });
 

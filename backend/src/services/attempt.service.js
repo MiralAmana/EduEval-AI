@@ -105,6 +105,71 @@ function gradeAnswer(question, answer) {
   return null;
 }
 
+/**
+ * Calcule les notes automatiques d'une copie, sans rien écrire : le total
+ * et la note de chaque réponse (null = à corriger par l'enseignant).
+ */
+function computeGrades(questions, answers) {
+  const answersByQuestionId = new Map(
+    answers.map((answer) => [answer.questionId, answer])
+  );
+
+  const scoreByAnswerId = new Map();
+  let total = 0;
+
+  for (const question of questions) {
+    const answer = answersByQuestionId.get(question.id);
+    const score = gradeAnswer(question, answer);
+
+    if (answer) {
+      scoreByAnswerId.set(answer.id, score);
+    }
+
+    total += score || 0;
+  }
+
+  return { total, scoreByAnswerId };
+}
+
+/**
+ * Une écriture par valeur de note distincte (un `updateMany` sur toutes
+ * les réponses qui ont cette note) plutôt qu'un UPDATE par réponse : une
+ * copie de 20 questions passe de 20 requêtes à 2 ou 3. Les réponses
+ * non notées automatiquement (null) ne sont pas touchées, pour ne pas
+ * écraser une note déjà saisie par l'enseignant.
+ */
+function buildScoreWrites(scoreByAnswerId, answers) {
+  const answerIdsByScore = new Map();
+
+  for (const answer of answers) {
+    const score = scoreByAnswerId.get(answer.id);
+
+    if (score === null || score === undefined || answer.score === score) {
+      continue;
+    }
+
+    if (!answerIdsByScore.has(score)) {
+      answerIdsByScore.set(score, []);
+    }
+
+    answerIdsByScore.get(score).push(answer.id);
+  }
+
+  return [...answerIdsByScore].map(([score, ids]) =>
+    prisma.answer.updateMany({
+      where: {
+        id: {
+          in: ids,
+        },
+      },
+
+      data: {
+        score,
+      },
+    })
+  );
+}
+
 async function gradeAttempt(attemptId, questions) {
   const answers = await prisma.answer.findMany({
     where: {
@@ -112,38 +177,11 @@ async function gradeAttempt(attemptId, questions) {
     },
   });
 
-  const answersByQuestionId = new Map(
-    answers.map((answer) => [answer.questionId, answer])
-  );
+  const { total, scoreByAnswerId } = computeGrades(questions, answers);
+  const writes = buildScoreWrites(scoreByAnswerId, answers);
 
-  let total = 0;
-  const updates = [];
-
-  for (const question of questions) {
-    const answer = answersByQuestionId.get(question.id);
-    const score = gradeAnswer(question, answer);
-
-    if (answer) {
-      updates.push(
-        prisma.answer.update({
-          where: {
-            id: answer.id,
-          },
-
-          data: {
-            score,
-          },
-        })
-      );
-    }
-
-    total += score || 0;
-  }
-
-  // Un seul aller-retour transactionnel plutôt qu'un update séquentiel
-  // par question.
-  if (updates.length > 0) {
-    await prisma.$transaction(updates);
+  if (writes.length > 0) {
+    await prisma.$transaction(writes);
   }
 
   return total;
@@ -176,39 +214,73 @@ async function notifyResultsPublished(attempt, score, questions) {
   }
 }
 
+/**
+ * Clôture une tentative (soumission, expiration ou blocage) : note les
+ * réponses et passe la tentative à son statut final dans UNE transaction
+ * (BEGIN + quelques écritures + COMMIT), puis renvoie la tentative à jour
+ * construite en mémoire — pas de rechargement complet depuis la base, qui
+ * coûtait une requête SQL par relation au moment où tous les élèves
+ * soumettent ensemble. Les réponses sont relues à cet instant (et non prises
+ * dans le contexte en cache) pour ne perdre aucune sauvegarde récente.
+ */
 async function finalizeAttempt(attempt, status, submittedAt) {
   const questions = attempt.publication.evaluation.questions;
-  const score = await gradeAttempt(attempt.id, questions);
-  const resultsPublished = isPureQcm(questions);
 
-  const updatedAttempt = await prisma.attempt.update({
+  const answers = await prisma.answer.findMany({
     where: {
-      id: attempt.id,
-    },
-
-    data: {
-      status,
-      submittedAt,
-      score,
-      resultsPublished,
+      attemptId: attempt.id,
     },
 
     include: {
-      answers: {
-        include: {
-          criterionScores: true,
-        },
-      },
+      criterionScores: true,
     },
   });
 
-  attemptCache.invalidate(attempt.id);
+  const { total, scoreByAnswerId } = computeGrades(questions, answers);
+  const resultsPublished = isPureQcm(questions);
+
+  await prisma.$transaction([
+    ...buildScoreWrites(scoreByAnswerId, answers),
+
+    prisma.attempt.update({
+      where: {
+        id: attempt.id,
+      },
+
+      data: {
+        status,
+        submittedAt,
+        score: total,
+        resultsPublished,
+      },
+    }),
+  ]);
+
+  const finalizedAttempt = {
+    ...attempt,
+    status,
+    submittedAt,
+    score: total,
+    resultsPublished,
+
+    answers: answers.map((answer) => {
+      const score = scoreByAnswerId.get(answer.id);
+
+      return score === null || score === undefined
+        ? answer
+        : { ...answer, score };
+    }),
+  };
+
+  attemptCache.set(attempt.id, finalizedAttempt);
 
   if (resultsPublished) {
-    await notifyResultsPublished(attempt, score, questions);
+    // Sans attendre : l'envoi de l'email (API externe, quotas) ne doit pas
+    // retarder la réponse à l'élève. notifyResultsPublished ne rejette jamais.
+    notifyResultsPublished(attempt, total, questions);
   }
 
-  return updatedAttempt;
+  return finalizedAttempt;
 }
 
 async function recomputeAttemptScore(attemptId, questions) {
@@ -280,9 +352,7 @@ async function getAttemptWithContext(attemptId) {
  */
 async function ensureAttemptIsCurrent(attempt) {
   if (attempt.status === "IN_PROGRESS" && new Date() >= attempt.endsAt) {
-    await finalizeAttempt(attempt, "EXPIRED", attempt.endsAt);
-
-    return getAttemptWithContext(attempt.id);
+    return finalizeAttempt(attempt, "EXPIRED", attempt.endsAt);
   }
 
   return attempt;
@@ -654,22 +724,52 @@ async function registerExit(attemptId) {
   attemptCache.invalidate(attemptId);
 
   if (shouldBlock) {
-    const refreshedAttempt = await getAttemptWithContext(attemptId);
+    const blockedAttempt = await finalizeAttempt(
+      { ...attempt, exitCount: nextExitCount },
+      "BLOCKED",
+      new Date()
+    );
 
-    await finalizeAttempt(refreshedAttempt, "BLOCKED", new Date());
-
-    return getAttempt(attemptId);
+    return buildStudentPayload(blockedAttempt);
   }
 
   return buildStudentPayload({ ...attempt, exitCount: nextExitCount });
 }
 
+/**
+ * Idempotent : soumettre une tentative déjà terminée (double clic, nouvel
+ * essai après une coupure réseau, temps écoulé côté serveur juste avant la
+ * requête) renvoie son état final au lieu d'une erreur, pour que le client
+ * puisse simplement réessayer sans risque.
+ */
 async function submitAttempt(attemptId) {
-  const attempt = await requireActiveAttempt(attemptId);
+  let attempt = await getAttemptWithContext(attemptId);
 
-  await finalizeAttempt(attempt, "SUBMITTED", new Date());
+  if (!attempt) {
+    const error = new Error("Tentative introuvable.");
+    error.status = 404;
+    throw error;
+  }
 
-  return getAttempt(attemptId);
+  attempt = await ensureAttemptIsCurrent(attempt);
+
+  if (attempt.status !== "IN_PROGRESS") {
+    return buildStudentPayload(attempt);
+  }
+
+  if (attempt.publication.status !== "ACTIVE") {
+    const error = new Error("Cette évaluation n’est plus disponible.");
+    error.status = 403;
+    throw error;
+  }
+
+  const submittedAttempt = await finalizeAttempt(
+    attempt,
+    "SUBMITTED",
+    new Date()
+  );
+
+  return buildStudentPayload(submittedAttempt);
 }
 
 // --- Correction enseignant ---

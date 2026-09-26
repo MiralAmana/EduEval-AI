@@ -41,6 +41,36 @@ const QUESTION_POINTS_LABEL = (points) =>
 const LOW_TIME_THRESHOLD_SECONDS = 5 * 60;
 const EXIT_DEBOUNCE_MS = 1000;
 const TEXT_AUTOSAVE_DEBOUNCE_MS = 800;
+const SUBMIT_MAX_ATTEMPTS = 5;
+const SUBMIT_RETRY_BASE_MS = 1000;
+
+function isRetryableSubmitError(error) {
+  const status = error.response?.status;
+
+  // Pas de réponse (réseau, timeout), limite de débit ou serveur saturé.
+  return !status || status === 429 || status >= 500;
+}
+
+// Une soumission qui échoue pour une raison passagère est réessayée avec
+// une attente croissante et aléatoire : quand toute une classe soumet en
+// même temps, des réessais immédiats et synchronisés aggraveraient la
+// surcharge. Sans risque de doublon : /submit est idempotent côté serveur.
+async function submitWithRetry(attemptId) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await submitAttempt(attemptId);
+    } catch (error) {
+      if (attempt >= SUBMIT_MAX_ATTEMPTS || !isRetryableSubmitError(error)) {
+        throw error;
+      }
+
+      const delay =
+        SUBMIT_RETRY_BASE_MS * 2 ** (attempt - 1) * (0.5 + Math.random());
+
+      await new Promise((resolve) => window.setTimeout(resolve, delay));
+    }
+  }
+}
 
 function getFullscreenElement() {
   return document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -198,6 +228,7 @@ function TakeEvaluation() {
     Boolean(getFullscreenElement())
   );
   const lastExitAtRef = useRef(0);
+  const autoSubmitTriggeredRef = useRef(false);
   const saveTimersRef = useRef({});
   const saveRequestSeqRef = useRef({});
 
@@ -263,7 +294,7 @@ function TakeEvaluation() {
     setSubmitting(true);
 
     try {
-      const payload = await submitAttempt(attemptId);
+      const payload = await submitWithRetry(attemptId);
 
       setData(payload);
     } catch (submitError) {
@@ -278,8 +309,18 @@ function TakeEvaluation() {
     }
   }, [attemptId]);
 
+  // Une seule soumission automatique à l'expiration du temps : si elle
+  // échoue malgré les réessais, l'élève garde le bouton manuel. Sans ce
+  // garde-fou, chaque échec relançait aussitôt une nouvelle soumission en
+  // boucle serrée, ce qui aggrave une surcharge du serveur.
   useEffect(() => {
-    if (isInProgress && secondsRemaining === 0 && !submitting) {
+    if (
+      isInProgress &&
+      secondsRemaining === 0 &&
+      !submitting &&
+      !autoSubmitTriggeredRef.current
+    ) {
+      autoSubmitTriggeredRef.current = true;
       handleSubmit();
     }
   }, [isInProgress, secondsRemaining, submitting, handleSubmit]);
