@@ -3,6 +3,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 
 const { errorHandler } = require("./middleware/error.middleware");
+const { TRUSTED_PROXIES } = require("./lib/trustProxy");
 
 const authRoutes = require("./routes/auth.routes");
 const aiRoutes = require("./routes/ai.routes");
@@ -17,7 +18,7 @@ const attemptRoutes = require("./routes/attempt.routes");
 
 const app = express();
 
-app.set("trust proxy", 1);
+app.set("trust proxy", TRUSTED_PROXIES);
 
 const allowedOrigins = (
   process.env.CORS_ORIGIN || "http://localhost:5173"
