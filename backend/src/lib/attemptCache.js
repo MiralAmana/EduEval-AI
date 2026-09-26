@@ -35,6 +35,31 @@ function set(attemptId, value) {
   });
 }
 
+// Met à jour EN PLACE l'entrée en cache, sans repousser son expiration :
+// une sauvegarde de réponse n'a plus à vider le cache (ce qui coûtait un
+// rechargement complet — 9 requêtes SQL — à la sauvegarde suivante), mais
+// le TTL continue de courir, donc un changement fait côté enseignant
+// (évaluation désactivée, etc.) est vu au plus tard à l'expiration.
+// `updater` s'applique à la valeur COURANTE (pas à une copie lue plus tôt) :
+// deux sauvegardes qui se chevauchent s'additionnent au lieu de s'écraser.
+// Ne fait rien (renvoie undefined) si l'entrée est absente ou expirée.
+function update(attemptId, updater) {
+  const entry = store.get(attemptId);
+
+  if (!entry) {
+    return undefined;
+  }
+
+  if (Date.now() > entry.expiresAt) {
+    store.delete(attemptId);
+    return undefined;
+  }
+
+  entry.value = updater(entry.value);
+
+  return entry.value;
+}
+
 function invalidate(attemptId) {
   store.delete(attemptId);
 }
@@ -43,9 +68,28 @@ function clear() {
   store.clear();
 }
 
+// Sans balayage, une entrée n'est supprimée que si on la relit après son
+// expiration : les tentatives terminées s'accumuleraient en mémoire jusqu'au
+// prochain redémarrage.
+const SWEEP_INTERVAL_MS = 60 * 1000;
+
+function sweep() {
+  const now = Date.now();
+
+  for (const [attemptId, entry] of store) {
+    if (now > entry.expiresAt) {
+      store.delete(attemptId);
+    }
+  }
+}
+
+setInterval(sweep, SWEEP_INTERVAL_MS).unref();
+
 module.exports = {
   get,
   set,
+  update,
   invalidate,
   clear,
+  sweep,
 };

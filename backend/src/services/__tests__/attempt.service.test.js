@@ -71,6 +71,7 @@ const {
   saveTextAnswer,
   saveFileAnswer,
   registerExit,
+  joinPublication,
   submitAttempt,
   getAttempt,
   getAnswerFileForTeacher,
@@ -490,6 +491,89 @@ describe("registerExit (régression : pas de double-fetch hors blocage)", () => 
   });
 });
 
+describe("joinPublication", () => {
+  it("crée la tentative sans relire tout son contexte en base et la met en cache", async () => {
+    const source = buildAttemptFixture();
+
+    prisma.publication.findUnique.mockResolvedValue(source.publication);
+    prisma.student.upsert.mockResolvedValue(source.student);
+    prisma.attempt.findUnique.mockResolvedValue(null); // pas de tentative existante
+    prisma.attempt.create.mockResolvedValue({
+      id: "attempt-neuve",
+      publicationId: "pub-1",
+      studentId: "student-1",
+      status: "IN_PROGRESS",
+      exitCount: 0,
+      startedAt: new Date(),
+      endsAt: new Date(Date.now() + 60 * 60 * 1000),
+      submittedAt: null,
+      score: null,
+      resultsPublished: false,
+    });
+
+    const payload = await joinPublication({
+      code: "abc234",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "Ada@Example.com",
+    });
+
+    expect(payload.attempt.id).toBe("attempt-neuve");
+    expect(payload.questions).toHaveLength(2);
+    // Une lecture pour chercher une tentative existante (aucune), zéro pour
+    // recharger celle qui vient d'être créée.
+    expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.attempt.create).toHaveBeenCalledWith({
+      data: expect.not.objectContaining({ include: expect.anything() }),
+    });
+
+    // La première sauvegarde de réponse trouve le contexte en cache.
+    prisma.answer.upsert.mockResolvedValue({
+      id: "ans-1",
+      questionId: "q-short",
+      attemptId: "attempt-neuve",
+      textAnswer: "Paris",
+      filePath: null,
+      fileName: null,
+      score: null,
+    });
+
+    await saveTextAnswer("attempt-neuve", "q-short", "Paris");
+
+    expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(1);
+  });
+
+  it("ne révèle pas les bonnes réponses dans la charge utile renvoyée à l'élève", async () => {
+    const source = buildAttemptFixture();
+
+    prisma.publication.findUnique.mockResolvedValue(source.publication);
+    prisma.student.upsert.mockResolvedValue(source.student);
+    prisma.attempt.findUnique.mockResolvedValue(null);
+    prisma.attempt.create.mockResolvedValue({
+      id: "attempt-neuve",
+      status: "IN_PROGRESS",
+      exitCount: 0,
+      startedAt: new Date(),
+      endsAt: new Date(Date.now() + 60 * 60 * 1000),
+      submittedAt: null,
+      score: null,
+      resultsPublished: false,
+    });
+
+    const payload = await joinPublication({
+      code: "ABC234",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "ada@example.com",
+    });
+
+    const json = JSON.stringify(payload);
+
+    expect(json).not.toContain("correctAnswer");
+    expect(payload.questions[0].choices.every((choice) => !("correct" in choice))).toBe(true);
+  });
+});
+
 describe("submitAttempt", () => {
   it("note et clôture la tentative en une seule transaction, sans recharger le contexte complet", async () => {
     const attempt = buildAttemptFixture();
@@ -644,7 +728,7 @@ describe("cache mémoire du contexte de tentative", () => {
     expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(2);
   });
 
-  it("invalide le cache après une écriture, forçant un nouveau chargement", async () => {
+  it("met à jour le cache en place après une écriture : pas de rechargement, et la lecture suivante voit la réponse", async () => {
     const attempt = buildAttemptFixture();
 
     prisma.attempt.findUnique.mockResolvedValue(attempt);
@@ -659,10 +743,101 @@ describe("cache mémoire du contexte de tentative", () => {
     });
 
     await getAttempt("attempt-1"); // fetch #1, peuple le cache
-    await saveTextAnswer("attempt-1", "q-short", "Paris"); // lit le cache, puis l'invalide après l'upsert
-    await getAttempt("attempt-1"); // cache invalidé -> fetch #2
+    await saveTextAnswer("attempt-1", "q-short", "Paris"); // met le cache à jour
+    const result = await getAttempt("attempt-1"); // servi par le cache
 
-    expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(2);
+    expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(1);
+    expect(
+      result.questions.find((question) => question.id === "q-short").answer
+        .textAnswer
+    ).toBe("Paris");
+  });
+
+  it("n'allonge pas la durée de vie du cache : une écriture ne repousse pas l'expiration", async () => {
+    jest.useFakeTimers();
+
+    try {
+      const attempt = buildAttemptFixture();
+
+      prisma.attempt.findUnique.mockResolvedValue(attempt);
+      prisma.answer.upsert.mockResolvedValue({
+        id: "ans-1",
+        questionId: "q-short",
+        attemptId: "attempt-1",
+        textAnswer: "Paris",
+        filePath: null,
+        fileName: null,
+        score: null,
+      });
+
+      await getAttempt("attempt-1"); // t = 0 : fetch #1
+      jest.advanceTimersByTime(6 * 1000);
+      await saveTextAnswer("attempt-1", "q-short", "Paris"); // t = 6 s
+      jest.advanceTimersByTime(5 * 1000); // t = 11 s > TTL de 10 s
+      await getAttempt("attempt-1"); // expiré malgré l'écriture -> fetch #2
+
+      // Sinon un élève qui sauvegarde sans arrêt ne verrait jamais une
+      // évaluation désactivée entre-temps par l'enseignant.
+      expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("cumule deux sauvegardes qui se chevauchent au lieu de s'écraser mutuellement", async () => {
+    const attempt = buildAttemptFixture();
+
+    prisma.attempt.findUnique.mockResolvedValue(attempt);
+    prisma.answer.upsert.mockImplementation(({ where }) =>
+      Promise.resolve({
+        id: `ans-${where.questionId_attemptId.questionId}`,
+        questionId: where.questionId_attemptId.questionId,
+        attemptId: "attempt-1",
+        textAnswer:
+          where.questionId_attemptId.questionId === "q-qcm" ? "c-right" : "Paris",
+        filePath: null,
+        fileName: null,
+        score: null,
+      })
+    );
+
+    await getAttempt("attempt-1"); // peuple le cache
+
+    await Promise.all([
+      saveTextAnswer("attempt-1", "q-qcm", "c-right"),
+      saveTextAnswer("attempt-1", "q-short", "Paris"),
+    ]);
+
+    const result = await getAttempt("attempt-1");
+    const byId = Object.fromEntries(
+      result.questions.map((question) => [question.id, question.answer])
+    );
+
+    expect(prisma.attempt.findUnique).toHaveBeenCalledTimes(1);
+    expect(byId["q-qcm"].textAnswer).toBe("c-right");
+    expect(byId["q-short"].textAnswer).toBe("Paris");
+  });
+
+  it("garde la même forme qu'un chargement en base (criterionScores) après une écriture", async () => {
+    const attempt = buildAttemptFixture();
+
+    prisma.attempt.findUnique.mockResolvedValue(attempt);
+    prisma.answer.upsert.mockResolvedValue({
+      id: "ans-1",
+      questionId: "q-short",
+      attemptId: "attempt-1",
+      textAnswer: "Paris",
+      filePath: null,
+      fileName: null,
+      score: null,
+    });
+
+    await getAttempt("attempt-1");
+    await saveTextAnswer("attempt-1", "q-short", "Paris");
+
+    const cached = attemptCache.get("attempt-1");
+
+    expect(cached.answers[0].criterionScores).toEqual([]);
   });
 
   it("expire après le TTL même sans écriture", async () => {

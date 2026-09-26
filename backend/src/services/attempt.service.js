@@ -475,25 +475,23 @@ async function joinPublication({ code, firstName, lastName, email }) {
   });
 
   if (!attempt) {
-    attempt = await prisma.attempt.create({
+    const createdAttempt = await prisma.attempt.create({
       data: {
         publicationId: publication.id,
         studentId: student.id,
         endsAt: new Date(Date.now() + publication.duration * 60 * 1000),
       },
-
-      include: {
-        answers: {
-        include: {
-          criterionScores: true,
-        },
-      },
-        student: true,
-        publication: {
-          include: evaluationWithQuestionsInclude,
-        },
-      },
     });
+
+    // Le contexte complet est déjà en main (publication + questions chargées
+    // plus haut, élève tout juste enregistré) : pas la peine de le relire en
+    // base (9 requêtes) pour une tentative qui n'a encore aucune réponse.
+    attempt = {
+      ...createdAttempt,
+      answers: [],
+      student,
+      publication,
+    };
   }
 
   attempt = await ensureAttemptIsCurrent(attempt);
@@ -505,6 +503,9 @@ async function joinPublication({ code, firstName, lastName, email }) {
     error.status = 409;
     throw error;
   }
+
+  // Le premier enregistrement de réponse trouvera le contexte en cache.
+  attemptCache.set(attempt.id, attempt);
 
   return buildStudentPayload(attempt);
 }
@@ -573,6 +574,26 @@ function withUpdatedAnswer(attempt, answer) {
   return { ...attempt, answers };
 }
 
+/**
+ * Répercute une réponse qui vient d'être enregistrée dans le contexte en
+ * cache (voir attemptCache.update) et renvoie le contexte à jour, ou
+ * undefined si l'entrée a expiré. Le contexte chargé depuis la base porte
+ * `criterionScores` sur chaque réponse, alors que l'upsert ne le renvoie
+ * pas : on garde celui de la réponse précédente pour conserver la même forme.
+ */
+function applyAnswerToCache(attemptId, answer) {
+  return attemptCache.update(attemptId, (cached) => {
+    const previous = cached.answers.find(
+      (item) => item.questionId === answer.questionId
+    );
+
+    return withUpdatedAnswer(cached, {
+      ...answer,
+      criterionScores: previous?.criterionScores ?? [],
+    });
+  });
+}
+
 async function requireActiveAttempt(attemptId) {
   let attempt = await getAttemptWithContext(attemptId);
 
@@ -635,9 +656,10 @@ async function saveTextAnswer(attemptId, questionId, textAnswer) {
     },
   });
 
-  attemptCache.invalidate(attemptId);
-
-  return buildStudentPayload(withUpdatedAnswer(attempt, answer));
+  return buildStudentPayload(
+    applyAnswerToCache(attemptId, answer) ??
+      withUpdatedAnswer(attempt, answer)
+  );
 }
 
 async function saveFileAnswer(
@@ -700,9 +722,10 @@ async function saveFileAnswer(
     },
   });
 
-  attemptCache.invalidate(attemptId);
-
-  return buildStudentPayload(withUpdatedAnswer(attempt, answer));
+  return buildStudentPayload(
+    applyAnswerToCache(attemptId, answer) ??
+      withUpdatedAnswer(attempt, answer)
+  );
 }
 
 async function registerExit(attemptId) {
@@ -721,7 +744,10 @@ async function registerExit(attemptId) {
     },
   });
 
-  attemptCache.invalidate(attemptId);
+  attemptCache.update(attemptId, (cached) => ({
+    ...cached,
+    exitCount: nextExitCount,
+  }));
 
   if (shouldBlock) {
     const blockedAttempt = await finalizeAttempt(
