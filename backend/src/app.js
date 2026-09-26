@@ -41,6 +41,40 @@ app.get("/", (req, res) => {
   res.send("Serveur EduEval AI démarré");
 });
 
+// TEMPORAIRE — à supprimer après vérification (voir AUDIT.md, « trust proxy »).
+// Renvoie à l'appelant ce que l'application voit de SA propre requête, pour
+// déterminer combien de proxys (Cloudflare, load balancer Render) séparent
+// l'application du client : tous les limiteurs par IP en dépendent.
+app.get("/api/_diagnostics/client-ip", (req, res) => {
+  const forwardedFor = String(req.headers["x-forwarded-for"] || "");
+  // Adresses de la plus proche (la socket) à la plus lointaine, comme
+  // Express les parcourt pour appliquer `trust proxy`.
+  const addresses = [
+    req.socket.remoteAddress,
+    ...forwardedFor
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .reverse(),
+  ];
+
+  res.json({
+    trustProxySetting: app.get("trust proxy"),
+    reqIp: req.ip,
+    socketRemoteAddress: req.socket.remoteAddress,
+    xForwardedFor: forwardedFor || null,
+    cfConnectingIp: req.headers["cf-connecting-ip"] || null,
+    trueClientIp: req.headers["true-client-ip"] || null,
+    xRealIp: req.headers["x-real-ip"] || null,
+    ipIfTrustProxyIs: Object.fromEntries(
+      [0, 1, 2, 3, 4].map((hops) => [
+        hops,
+        addresses[Math.min(hops, addresses.length - 1)],
+      ])
+    ),
+  });
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/pdf", pdfRoutes);
