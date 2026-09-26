@@ -1306,7 +1306,10 @@ async function publishResults(attemptId, userId) {
 
   attemptCache.invalidate(attemptId);
 
-  await notifyResultsPublished(
+  // Sans attendre : l'email passe par la file d'envoi (débit limité), qui peut
+  // être occupée ; la publication ne doit pas en dépendre.
+  // notifyResultsPublished ne rejette jamais.
+  notifyResultsPublished(
     attempt,
     attempt.score,
     attempt.publication.evaluation.questions

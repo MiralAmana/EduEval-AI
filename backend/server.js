@@ -1,6 +1,9 @@
 require("dotenv").config();
 
 const app = require("./src/app");
+const { warnIfUsingTestSender } = require("./src/services/email.service");
+
+warnIfUsingTestSender();
 
 const PORT = process.env.PORT || 3000;
 const KEEP_ALIVE_INTERVAL_MS = 10 * 60 * 1000;

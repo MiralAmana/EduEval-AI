@@ -198,6 +198,33 @@ describe("requestPasswordReset", () => {
     expect(sendPasswordResetEmail).not.toHaveBeenCalled();
   });
 
+  it("journalise un envoi refusé sans faire échouer la requête (sinon un compte existant se distinguerait d'un compte inconnu)", async () => {
+    const consoleError = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    prisma.user.findUnique.mockResolvedValue({
+      id: "user-1",
+      email: "ada@example.com",
+      firstName: "Ada",
+    });
+    prisma.user.update.mockResolvedValue({});
+    sendPasswordResetEmail.mockRejectedValueOnce(
+      new Error("Resend 403 validation_error : domaine de test")
+    );
+
+    await expect(
+      authService.requestPasswordReset("ada@example.com")
+    ).resolves.toBeUndefined();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("réinitialisation"),
+      expect.stringContaining("403")
+    );
+
+    consoleError.mockRestore();
+  });
+
   it("stocke un hash du token et envoie un email contenant le token en clair, cohérent avec le hash stocké", async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: "user-1",

@@ -73,6 +73,7 @@ const {
   registerExit,
   joinPublication,
   submitAttempt,
+  publishResults,
   getAttempt,
   getAnswerFileForTeacher,
   getAnswerFilePreview,
@@ -1360,6 +1361,65 @@ describe("getQuestionAnswersForReview", () => {
     );
     expect(graded.score).toBe(3);
     expect(graded.student.firstName).toBe("Bo");
+  });
+});
+
+describe("publishResults", () => {
+  it("publie sans attendre l'envoi de l'email (la file d'envoi peut être occupée)", async () => {
+    const attempt = buildTeacherAttemptFixture(buildQcmQuestion());
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+    prisma.attempt.update.mockResolvedValue({});
+
+    const { sendResultsPublishedEmail } = require("../email.service");
+    sendResultsPublishedEmail.mockReturnValueOnce(new Promise(() => {})); // ne se termine jamais
+
+    const result = await publishResults("attempt-1", "teacher-1");
+
+    expect(prisma.attempt.update).toHaveBeenCalledWith({
+      where: { id: "attempt-1" },
+      data: { resultsPublished: true },
+    });
+    expect(sendResultsPublishedEmail).toHaveBeenCalledTimes(1);
+    expect(result.attempt.id).toBe("attempt-1");
+  });
+
+  it("ne fait pas échouer la publication si l'envoi de l'email est refusé, et le journalise", async () => {
+    const consoleError = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const attempt = buildTeacherAttemptFixture(buildQcmQuestion());
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+    prisma.attempt.update.mockResolvedValue({});
+
+    const { sendResultsPublishedEmail } = require("../email.service");
+    sendResultsPublishedEmail.mockRejectedValueOnce(
+      new Error("Resend 403 validation_error")
+    );
+
+    await expect(publishResults("attempt-1", "teacher-1")).resolves.toBeDefined();
+    await new Promise((resolve) => setImmediate(resolve)); // laisse le catch s'exécuter
+
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("email de résultats"),
+      expect.stringContaining("403")
+    );
+
+    consoleError.mockRestore();
+  });
+
+  it("refuse de publier une tentative encore en cours (409)", async () => {
+    const attempt = buildTeacherAttemptFixture(buildQcmQuestion(), {
+      status: "IN_PROGRESS",
+    });
+
+    prisma.attempt.findFirst.mockResolvedValue(attempt);
+
+    await expect(publishResults("attempt-1", "teacher-1")).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(prisma.attempt.update).not.toHaveBeenCalled();
   });
 });
 

@@ -148,11 +148,22 @@ async function requestPasswordReset(email) {
 
   const resetLink = `${getFrontendUrl()}/reset-password?token=${token}`;
 
-  await sendPasswordResetEmail({
-    to: user.email,
-    firstName: user.firstName,
-    resetLink,
-  });
+  // Un envoi refusé (domaine non vérifié, quota, panne Resend) est journalisé
+  // mais ne change pas la réponse : sinon un compte existant ferait échouer la
+  // requête (500) alors qu'un compte inconnu répond normalement, ce qui
+  // révélerait quelles adresses ont un compte.
+  try {
+    await sendPasswordResetEmail({
+      to: user.email,
+      firstName: user.firstName,
+      resetLink,
+    });
+  } catch (error) {
+    console.error(
+      "Échec de l’envoi de l’email de réinitialisation :",
+      error.message
+    );
+  }
 }
 
 async function resetPassword(token, newPassword) {
